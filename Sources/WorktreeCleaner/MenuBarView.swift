@@ -1,10 +1,11 @@
 import SwiftUI
 import AppKit
 
-/// 顶部菜单栏常驻下拉面板（同心圆角悬浮卡片 + 90% 灰阶克制美学 + 固定高度防裁切）
+/// 顶部菜单栏常驻下拉面板（同心圆角悬浮卡片 + 全量仓库可展开 + 确定高度可顺滑滚动）
 struct MenuBarView: View {
     @Bindable var state: AppState
     @Environment(\.openWindow) private var openWindow
+    @State private var expandedRepos: Set<String> = []
 
     private var cautionItems: [WorktreeItem] {
         state.items.filter { $0.safetyLevel == .caution }
@@ -14,20 +15,26 @@ struct MenuBarView: View {
         state.items.filter { $0.safetyLevel == .safe }.count
     }
 
-    private var topRepoSummaries: [(repo: String, count: Int, bytes: Int64)] {
+    private var repoSummaries: [(repo: String, count: Int, bytes: Int64, items: [WorktreeItem])] {
         let grouped = Dictionary(grouping: state.items, by: \.mainRepoName)
         return grouped.map { repo, list in
             let totalBytes = list.compactMap(\.diskSizeBytes).reduce(0, +)
-            return (repo: repo, count: list.count, bytes: totalBytes)
+            let sortedList = list.sorted { lhs, rhs in
+                if lhs.safetyLevel != rhs.safetyLevel { return lhs.safetyLevel < rhs.safetyLevel }
+                return (lhs.diskSizeBytes ?? 0) > (rhs.diskSizeBytes ?? 0)
+            }
+            return (repo: repo, count: list.count, bytes: totalBytes, items: sortedList)
         }
         .sorted { $0.bytes > $1.bytes }
-        .prefix(4)
-        .map { $0 }
+    }
+
+    private var isCompact: Bool {
+        repoSummaries.count <= 2 && expandedRepos.isEmpty
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            // MARK: 顶栏：极简标题外链 + 3 个 26pt 圆形 Liquid Glass 按钮
+        VStack(spacing: 0) {
+            // MARK: 固定顶栏：标题外链 + 圆形玻璃动作按钮
             HStack(spacing: 6) {
                 Button {
                     openMainWindow()
@@ -78,9 +85,20 @@ struct MenuBarView: View {
                     }
                 }
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
 
-            // MARK: 卡片 1：可释放空间 + 状态分布
+            // MARK: 可滚动内容区（支持触控板上下顺滑滚动浏览全量仓库与展开子项）
+            scrollBody
+        }
+        .frame(width: 336)
+    }
+
+    @ViewBuilder
+    private var scrollBody: some View {
+        let contentStack = VStack(spacing: 8) {
+            // 卡片 1：全景空间与安全分布
             FloatingCard(cornerRadius: 12, padding: 13) {
                 VStack(alignment: .leading, spacing: 11) {
                     HStack(alignment: .lastTextBaseline) {
@@ -122,36 +140,99 @@ struct MenuBarView: View {
                 }
             }
 
-            // MARK: 卡片 2：仓库空间占用 Top 4
-            if !topRepoSummaries.isEmpty {
+            // 卡片 2：全量仓库占用（无数量截断，点击任意仓库可展开子 Worktree）
+            if !repoSummaries.isEmpty {
                 FloatingCard(cornerRadius: 12, padding: 13) {
                     VStack(alignment: .leading, spacing: 10) {
-                        let maxBytes = max(topRepoSummaries.first?.bytes ?? 1, 1)
+                        HStack {
+                            Text(state.tr("全部仓库 · \(repoSummaries.count)", "Repositories · \(repoSummaries.count)"))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
 
-                        ForEach(Array(topRepoSummaries.enumerated()), id: \.element.repo) { idx, entry in
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack(spacing: 6) {
-                                    Text(entry.repo == "Orphaned" ? state.tr("孤儿残留", "Orphaned") : entry.repo)
-                                        .font(.system(size: 12.5, weight: .medium))
-                                        .lineLimit(1)
-                                    Text("\(entry.count)")
-                                        .font(.system(size: 10.5).monospacedDigit())
-                                        .foregroundStyle(.tertiary)
-                                    Spacer()
-                                    Text(ByteCountFormatter.string(fromByteCount: entry.bytes, countStyle: .file))
-                                        .font(.system(size: 11.5).monospacedDigit())
-                                        .foregroundStyle(.secondary)
+                        let maxBytes = max(repoSummaries.first?.bytes ?? 1, 1)
+
+                        ForEach(Array(repoSummaries.enumerated()), id: \.element.repo) { idx, entry in
+                            let isExpanded = expandedRepos.contains(entry.repo)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Button {
+                                    withAnimation(.snappy(duration: 0.18)) {
+                                        if isExpanded {
+                                            expandedRepos.remove(entry.repo)
+                                        } else {
+                                            expandedRepos.insert(entry.repo)
+                                        }
+                                    }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                                .font(.system(size: 9, weight: .semibold))
+                                                .foregroundStyle(.tertiary)
+                                                .frame(width: 10)
+
+                                            Text(entry.repo == "Orphaned" ? state.tr("孤儿残留", "Orphaned") : entry.repo)
+                                                .font(.system(size: 12.5, weight: .medium))
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(1)
+
+                                            Text("\(entry.count)")
+                                                .font(.system(size: 10.5).monospacedDigit())
+                                                .foregroundStyle(.tertiary)
+
+                                            Spacer()
+
+                                            Text(ByteCountFormatter.string(fromByteCount: entry.bytes, countStyle: .file))
+                                                .font(.system(size: 11.5).monospacedDigit())
+                                                .foregroundStyle(.secondary)
+                                        }
+
+                                        SegmentedTickBar(
+                                            ratio: Double(entry.bytes) / Double(maxBytes),
+                                            color: Color.accentColor.opacity(0.85),
+                                            segments: 46,
+                                            height: 10
+                                        )
+                                    }
+                                    .contentShape(Rectangle())
                                 }
+                                .buttonStyle(.plain)
 
-                                SegmentedTickBar(
-                                    ratio: Double(entry.bytes) / Double(maxBytes),
-                                    color: Color.accentColor.opacity(0.85),
-                                    segments: 34,
-                                    height: 8
-                                )
+                                if isExpanded {
+                                    VStack(spacing: 4) {
+                                        ForEach(entry.items) { wt in
+                                            Button {
+                                                state.selectedItemID = wt.id
+                                                openMainWindow()
+                                            } label: {
+                                                HStack(spacing: 7) {
+                                                    Circle()
+                                                        .fill(wt.safetyLevel.color.opacity(0.88))
+                                                        .frame(width: 5.5, height: 5.5)
+                                                    Text(wt.displayBranch(language: state.language))
+                                                        .font(.system(size: 11.5))
+                                                        .foregroundStyle(.primary.opacity(0.86))
+                                                        .lineLimit(1)
+                                                    Spacer()
+                                                    Text(wt.formattedSize)
+                                                        .font(.system(size: 10.5).monospacedDigit())
+                                                        .foregroundStyle(.tertiary)
+                                                }
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                    .padding(.leading, 14)
+                                    .padding(.top, 2)
+                                }
                             }
 
-                            if idx < topRepoSummaries.count - 1 {
+                            if idx < repoSummaries.count - 1 {
                                 Divider().opacity(0.3)
                             }
                         }
@@ -159,7 +240,7 @@ struct MenuBarView: View {
                 }
             }
 
-            // MARK: 卡片 3：底部快捷操作卡（固定展开，绝不裁切）
+            // 卡片 3：底部快捷操作卡
             FloatingCard(cornerRadius: 12, padding: 12) {
                 VStack(spacing: 10) {
                     HStack {
@@ -199,9 +280,20 @@ struct MenuBarView: View {
                 }
             }
         }
-        .padding(10)
-        .frame(width: 326)
-        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
+
+        if isCompact {
+            ScrollView(.vertical, showsIndicators: false) {
+                contentStack
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+            ScrollView(.vertical, showsIndicators: true) {
+                contentStack
+            }
+            .frame(height: 460)
+        }
     }
 
     private func openMainWindow() {

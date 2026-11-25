@@ -261,8 +261,8 @@ struct FloatingCard<Content: View>: View {
 struct SegmentedTickBar: View {
     let ratio: Double
     let color: Color
-    var segments: Int = 34
-    var height: CGFloat = 8
+    var segments: Int = 46
+    var height: CGFloat = 10
 
     var body: some View {
         let clamped = min(max(ratio, 0), 1)
@@ -270,7 +270,7 @@ struct SegmentedTickBar: View {
 
         HStack(spacing: 2) {
             ForEach(0..<segments, id: \.self) { index in
-                Capsule()
+                RoundedRectangle(cornerRadius: 1.4, style: .continuous)
                     .fill(index < activeCount ? color : Color.primary.opacity(0.10))
                     .frame(maxWidth: .infinity)
                     .frame(height: height)
