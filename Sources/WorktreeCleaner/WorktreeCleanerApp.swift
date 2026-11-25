@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import WorktreeCleanerCore
 
 @main
 struct WorktreeCleanerApp: App {

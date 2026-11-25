@@ -67,6 +67,23 @@ xattr -cr "/Applications/Worktree Cleaner.app"
 
 ---
 
+## Antigravity MCP App 插件（SEP-1865）
+
+Worktree Cleaner 同时内置了 **Antigravity MCP App 插件**：底层复用同一套原生 Swift `WorktreeCleanerCore` 引擎（零逻辑重复），前端基于官方 `@modelcontextprotocol/ext-apps` 打包为单文件交互界面，支持：
+- **聊天内嵌渲染**：对话中调用 `open_worktree_cleaner` 直接弹出可视化面板
+- **右侧边栏（`aux_pane`）**：通过 `+` 菜单直接打开
+- **左侧栏全页应用（`global`）**：从 Antigravity 左侧栏一键进入完整工作台
+
+### 一键安装到 Antigravity
+
+```bash
+./scripts/install_antigravity_plugin.sh
+```
+
+脚本会自动打包前端单文件 HTML、编译 Release 版 `WorktreeCleanerMCP` 并安装至 `~/.gemini/config/plugins/worktree-cleaner/`，无需重启即可生效。
+
+---
+
 ## 开源协议
 
 [MIT License](LICENSE)

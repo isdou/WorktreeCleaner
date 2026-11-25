@@ -70,6 +70,25 @@ open dist/WorktreeCleaner.app
 
 ---
 
+## Antigravity MCP App (SEP-1865)
+
+Worktree Cleaner also ships as a **native Antigravity MCP App plugin** powered by the exact same `WorktreeCleanerCore` Swift engine + an interactive single-file UI built with `@modelcontextprotocol/ext-apps`.
+
+It supports all three Antigravity surfaces:
+- **Inline in chat** when the agent calls `open_worktree_cleaner`
+- **Side Pane (`+` menu)** via `aux_pane` entrypoint
+- **Full-Page Sidebar** via `global` entrypoint
+
+### One-Command Install into Antigravity
+
+```bash
+./scripts/install_antigravity_plugin.sh
+```
+
+This builds `WorktreeCleanerMCP` + the bundled HTML UI and installs the plugin directly into `~/.gemini/config/plugins/worktree-cleaner/`.
+
+---
+
 ## License
 
 [MIT License](LICENSE)

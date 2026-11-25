@@ -7,16 +7,28 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "WorktreeCleaner", targets: ["WorktreeCleaner"])
+        .library(name: "WorktreeCleanerCore", targets: ["WorktreeCleanerCore"]),
+        .executable(name: "WorktreeCleaner", targets: ["WorktreeCleaner"]),
+        .executable(name: "WorktreeCleanerMCP", targets: ["WorktreeCleanerMCP"])
     ],
     targets: [
+        .target(
+            name: "WorktreeCleanerCore",
+            path: "Sources/WorktreeCleanerCore"
+        ),
         .executableTarget(
             name: "WorktreeCleaner",
+            dependencies: ["WorktreeCleanerCore"],
             path: "Sources/WorktreeCleaner"
+        ),
+        .executableTarget(
+            name: "WorktreeCleanerMCP",
+            dependencies: ["WorktreeCleanerCore"],
+            path: "Sources/WorktreeCleanerMCP"
         ),
         .testTarget(
             name: "WorktreeCleanerTests",
-            dependencies: ["WorktreeCleaner"],
+            dependencies: ["WorktreeCleanerCore"],
             path: "Tests/WorktreeCleanerTests"
         )
     ]

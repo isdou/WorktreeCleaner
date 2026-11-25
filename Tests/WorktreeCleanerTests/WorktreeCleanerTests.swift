@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import WorktreeCleaner
+@testable import WorktreeCleanerCore
 
 @Suite("WorktreeCleaner Core Tests")
 struct WorktreeCleanerTests {
@@ -150,6 +150,50 @@ struct WorktreeCleanerTests {
         #expect(WorktreeScanner.isPath("/Users/alex/Desktop/repo", underAnyOf: denied) == true)
         #expect(WorktreeScanner.isPath("/Users/alex/DesktopTools/repo", underAnyOf: denied) == false)
         #expect(WorktreeScanner.isPath("/Users/alex/Projects/repo", underAnyOf: denied) == false)
+    }
+
+    @Test("MCP App server advertises SEP-1865 tools, entrypoints, and UI HTML resource")
+    func testMCPProtocolHandshakeAndMetadata() async throws {
+        let tmpHTML = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("wtc-mcp-test-\(UUID().uuidString).html")
+        try "<!DOCTYPE html><html><body>Worktree Cleaner Test</body></html>".write(to: tmpHTML, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: tmpHTML) }
+
+        let handler = MCPServerHandler(customHTMLPath: tmpHTML.path)
+
+        // 1. initialize
+        let initReply = try #require(await handler.handleJSONLine(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#))
+        let initObj = try #require(try JSONSerialization.jsonObject(with: Data(initReply.utf8)) as? [String: Any])
+        let initResult = try #require(initObj["result"] as? [String: Any])
+        let caps = try #require(initResult["capabilities"] as? [String: Any])
+        #expect(caps["tools"] != nil)
+        #expect(caps["resources"] != nil)
+
+        // 2. tools/list
+        let toolsReply = try #require(await handler.handleJSONLine(#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#))
+        let toolsObj = try #require(try JSONSerialization.jsonObject(with: Data(toolsReply.utf8)) as? [String: Any])
+        let toolsResult = try #require(toolsObj["result"] as? [String: Any])
+        let tools = try #require(toolsResult["tools"] as? [[String: Any]])
+
+        let openTool = try #require(tools.first { ($0["name"] as? String) == "open_worktree_cleaner" })
+        let openMeta = try #require(openTool["_meta"] as? [String: Any])
+        let uiMeta = try #require(openMeta["ui"] as? [String: Any])
+        #expect((uiMeta["resourceUri"] as? String) == MCPServerHandler.appURI)
+        let agyMeta = try #require(openMeta["com.google.antigravity/ui"] as? [String: Any])
+        let entrypoints = try #require(agyMeta["entrypoints"] as? [[String: Any]])
+        #expect(entrypoints.count == 2)
+
+        let finderTool = try #require(tools.first { ($0["name"] as? String) == "open_in_finder" })
+        let finderUI = try #require((finderTool["_meta"] as? [String: Any])?["ui"] as? [String: Any])
+        #expect((finderUI["visibility"] as? [String]) == ["app"])
+
+        // 3. resources/read
+        let readReply = try #require(await handler.handleJSONLine(#"{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"ui://worktree-cleaner/app.html"}}"#))
+        let readObj = try #require(try JSONSerialization.jsonObject(with: Data(readReply.utf8)) as? [String: Any])
+        let readResult = try #require(readObj["result"] as? [String: Any])
+        let contents = try #require(readResult["contents"] as? [[String: Any]])
+        #expect((contents.first?["mimeType"] as? String) == "text/html;profile=mcp-app")
+        #expect((contents.first?["text"] as? String)?.contains("Worktree Cleaner Test") == true)
     }
 
     // MARK: - Helpers

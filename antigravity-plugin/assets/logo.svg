@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="64" y1="8" x2="64" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2c2c2f"/>
+      <stop offset="50%" stop-color="#171719"/>
+      <stop offset="100%" stop-color="#070708"/>
+    </linearGradient>
+    <linearGradient id="branch" x1="64" y1="44" x2="64" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7c7c82"/>
+      <stop offset="100%" stop-color="#38383c"/>
+    </linearGradient>
+    <linearGradient id="front" x1="64" y1="34" x2="64" y2="94" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#c9c9ce"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)" stroke="#ffffff" stroke-opacity="0.16" stroke-width="1.5"/>
+  <path d="M46 84C46 62 82 72 82 48" stroke="url(#branch)" stroke-width="11" stroke-linecap="round"/>
+  <path d="M46 38V90" stroke="url(#front)" stroke-width="11" stroke-linecap="round"/>
+  <circle cx="82" cy="46" r="10.5" fill="url(#front)"/>
+  <circle cx="82" cy="46" r="4" fill="#141416"/>
+</svg>

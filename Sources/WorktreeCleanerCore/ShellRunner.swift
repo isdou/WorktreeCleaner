@@ -1,16 +1,22 @@
 import Foundation
 
 /// 轻量异步命令行执行器：带并发读取与超时保护，绝不阻塞主线程或因 pipe 写满挂起
-enum ShellRunner {
-    struct Output: Sendable {
-        let exitCode: Int32
-        let stdout: String
-        let stderr: String
+public enum ShellRunner {
+    public struct Output: Sendable {
+        public let exitCode: Int32
+        public let stdout: String
+        public let stderr: String
 
-        var succeeded: Bool { exitCode == 0 }
+        public var succeeded: Bool { exitCode == 0 }
+
+        public init(exitCode: Int32, stdout: String, stderr: String) {
+            self.exitCode = exitCode
+            self.stdout = stdout
+            self.stderr = stderr
+        }
     }
 
-    static func run(
+    public static func run(
         _ executable: String,
         arguments: [String],
         currentDirectory: String? = nil,
@@ -31,7 +37,6 @@ enum ShellRunner {
                 var env = ProcessInfo.processInfo.environment
                 env["GIT_TERMINAL_PROMPT"] = "0"
                 env["LC_ALL"] = "C"
-                // 确保子进程能找到 Homebrew 等常用路径
                 let existingPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
                 if !existingPath.contains("/opt/homebrew/bin") {
                     env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:\(existingPath)"
@@ -50,7 +55,6 @@ enum ShellRunner {
                     return
                 }
 
-                // 并发读取 stdout 与 stderr，防止大输出塞满管道缓冲区引发死锁
                 nonisolated(unsafe) var outData = Data()
                 nonisolated(unsafe) var errData = Data()
                 let ioGroup = DispatchGroup()
@@ -94,20 +98,18 @@ enum ShellRunner {
         }
     }
 
-    static func git(_ arguments: [String], in directory: String, timeout: TimeInterval = 12) async -> Output {
+    public static func git(_ arguments: [String], in directory: String, timeout: TimeInterval = 12) async -> Output {
         await run("/usr/bin/git", arguments: ["-C", directory] + arguments, timeout: timeout)
     }
 
-    /// 查找本地可用可执行文件（如 gh）
-    static func findExecutable(candidates: [String]) -> String? {
+    public static func findExecutable(candidates: [String]) -> String? {
         for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
             return path
         }
         return nil
     }
 
-    /// 快速获取目录占用字节数（使用 du -sk）
-    static func directorySizeBytes(_ path: String) async -> Int64? {
+    public static func directorySizeBytes(_ path: String) async -> Int64? {
         guard FileManager.default.fileExists(atPath: path) else { return 0 }
         let res = await run("/usr/bin/du", arguments: ["-sk", path], timeout: 20)
         guard res.succeeded else { return nil }

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import WorktreeCleanerCore
 
 /// 主窗口：严格遵循 macOS HIG + Tahoe Liquid Glass 范式
 /// - 通顶毛玻璃侧边栏 + 44pt 统一标题栏

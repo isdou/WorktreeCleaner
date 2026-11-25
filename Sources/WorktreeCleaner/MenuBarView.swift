@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import WorktreeCleanerCore
 
 /// 顶部菜单栏常驻下拉面板（同心圆角悬浮卡片 + 全量仓库可展开 + 确定高度可顺滑滚动）
 struct MenuBarView: View {

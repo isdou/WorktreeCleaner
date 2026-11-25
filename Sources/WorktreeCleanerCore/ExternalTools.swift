@@ -3,15 +3,22 @@ import AppKit
 import ServiceManagement
 
 /// 本机已安装的外部编辑器或终端应用
-struct ExternalApp: Identifiable, Hashable, Sendable {
-    let id: String // app path
-    let name: String
-    let appURL: URL
-    let isTerminal: Bool
+public struct ExternalApp: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let appURL: URL
+    public let isTerminal: Bool
+
+    public init(id: String, name: String, appURL: URL, isTerminal: Bool) {
+        self.id = id
+        self.name = name
+        self.appURL = appURL
+        self.isTerminal = isTerminal
+    }
 }
 
 /// 自动探测本机已安装的编辑器与终端，提供一键打开能力
-enum ExternalToolDetector {
+public enum ExternalToolDetector {
     private static let editorCandidates: [(name: String, bundles: [String])] = [
         ("Cursor", ["Cursor.app"]),
         ("VS Code", ["Visual Studio Code.app", "Visual Studio Code - Insiders.app"]),
@@ -29,7 +36,7 @@ enum ExternalToolDetector {
         ("Terminal", ["Terminal.app"])
     ]
 
-    static func detectInstalledApps() -> [ExternalApp] {
+    public static func detectInstalledApps() -> [ExternalApp] {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
         let searchDirs = [
@@ -68,7 +75,7 @@ enum ExternalToolDetector {
     }
 
     @MainActor
-    static func open(directory path: String, with app: ExternalApp) {
+    public static func open(directory path: String, with app: ExternalApp) {
         let dirURL = URL(fileURLWithPath: path)
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
@@ -77,12 +84,12 @@ enum ExternalToolDetector {
 }
 
 /// 开机自启管理器（基于 SMAppService.mainApp，带未签名开发构建容错）
-enum LaunchAtLoginManager {
-    static var isEnabled: Bool {
+public enum LaunchAtLoginManager {
+    public static var isEnabled: Bool {
         SMAppService.mainApp.status == .enabled
     }
 
-    static func setEnabled(_ enabled: Bool) -> Result<Void, Error> {
+    public static func setEnabled(_ enabled: Bool) -> Result<Void, Error> {
         do {
             if enabled {
                 if SMAppService.mainApp.status != .enabled {

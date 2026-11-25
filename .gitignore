@@ -8,6 +8,8 @@ dist/
 *.dmg
 *.zip
 *.app
+mcp-app/node_modules/
+mcp-app/dist/
 
 # macOS
 .DS_Store

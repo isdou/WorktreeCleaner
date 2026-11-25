@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "worktree-cleaner": {
+      "command": "${PLUGIN_ROOT}/bin/WorktreeCleanerMCP",
+      "args": [],
+      "env": {
+        "WORKTREE_CLEANER_APP_HTML": "${PLUGIN_ROOT}/dist/worktree-cleaner-app.html"
+      }
+    }
+  }
+}

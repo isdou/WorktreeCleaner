@@ -1,10 +1,10 @@
 import Foundation
 
 /// Git Worktree 全盘扫描、功能剖析、四重防误删护栏与安全清理引擎
-enum WorktreeScanner {
+public enum WorktreeScanner {
 
     /// 默认扫描的通用开发项目目录（不含任何个人硬编码路径）
-    static var defaultSearchRoots: [String] {
+    public static var defaultSearchRoots: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let candidates = [
             "\(home)/Projects",
@@ -19,7 +19,7 @@ enum WorktreeScanner {
     }
 
     /// 常见 AI Agent 工具存放 Worktree 的独立目录
-    static var agentWorktreeRoots: [String] {
+    public static var agentWorktreeRoots: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return [
             "\(home)/.codex/worktrees",
@@ -30,7 +30,7 @@ enum WorktreeScanner {
     }
 
     /// 受 macOS TCC 隐私保护的常见用户目录
-    static var protectedTCCRoots: [String] {
+    public static var protectedTCCRoots: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return [
             canonicalPath("\(home)/Desktop"),
@@ -53,7 +53,7 @@ enum WorktreeScanner {
 
     // MARK: - 1. 全量扫描入口
 
-    static func scanAll(searchRoots: [String]) async -> [WorktreeItem] {
+    public static func scanAll(searchRoots: [String]) async -> [WorktreeItem] {
         // 先串行预检受 TCC 保护的目录，避免后续并发 git/du 子进程同时撞门引发多次弹窗
         let deniedRoots = preflightProtectedRoots(neededFor: searchRoots)
         let discovery = discoverRepositoriesAndOrphans(searchRoots: searchRoots, deniedRoots: deniedRoots)
@@ -172,7 +172,7 @@ enum WorktreeScanner {
 
     // MARK: - 1.5 TCC 受保护目录串行预检门禁
 
-    static func isPath(_ path: String, underAnyOf roots: Set<String>) -> Bool {
+    public static func isPath(_ path: String, underAnyOf roots: Set<String>) -> Bool {
         let norm = canonicalPath(path)
         for root in roots {
             let normRoot = canonicalPath(root)
@@ -183,7 +183,7 @@ enum WorktreeScanner {
         return false
     }
 
-    static func matchingProtectedRoots(
+    public static func matchingProtectedRoots(
         for paths: [String],
         protectedRoots: [String] = protectedTCCRoots
     ) -> [String] {
@@ -746,7 +746,7 @@ enum WorktreeScanner {
     // MARK: - 4. 纯逻辑检测与解析函数（含单测覆盖）
 
     /// 判断 git status --ignored 输出中的敏感高价值忽略文件（排除示例模板与已知依赖目录）
-    static func isPreciousIgnoredFile(_ relativePath: String) -> Bool {
+    public static func isPreciousIgnoredFile(_ relativePath: String) -> Bool {
         let trimmed = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/\""))
         guard !trimmed.isEmpty else { return false }
 
@@ -775,7 +775,7 @@ enum WorktreeScanner {
         return preciousExtensions.contains(where: { fileName.hasSuffix($0) })
     }
 
-    static func parsePreciousIgnoredFiles(fromGitStatus stdout: String) -> [String] {
+    public static func parsePreciousIgnoredFiles(fromGitStatus stdout: String) -> [String] {
         var found: [String] = []
         for line in stdout.components(separatedBy: .newlines) where line.hasPrefix("!! ") {
             let path = String(line.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -788,7 +788,7 @@ enum WorktreeScanner {
     }
 
     /// 解析 `git cherry <base> HEAD` 输出：非空且每行都以 `- ` 开头表示所有提交已被等价合入
-    static func isSquashMergedOutput(_ gitCherryStdout: String) -> Bool {
+    public static func isSquashMergedOutput(_ gitCherryStdout: String) -> Bool {
         let lines = gitCherryStdout
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -798,7 +798,7 @@ enum WorktreeScanner {
     }
 
     /// 解析 `lsof -a -d cwd -Fpcn` 的输出，返回 (pid, command, cwd)
-    static func parseLsofCwdOutput(
+    public static func parseLsofCwdOutput(
         _ stdout: String,
         excludingPID: Int32 = -1
     ) -> [(pid: Int32, command: String, cwd: String)] {
@@ -843,13 +843,13 @@ enum WorktreeScanner {
         return matched
     }
 
-    static func isCacheDirectoryName(_ name: String) -> Bool {
+    public static func isCacheDirectoryName(_ name: String) -> Bool {
         cacheDirectoryNames.contains(name)
     }
 
     // MARK: - 5. 异步磁盘体积与构建缓存统计
 
-    static func populateDiskAndCacheStats(for item: WorktreeItem) async -> (diskBytes: Int64, cacheDirs: [CacheDirItem], cacheBytes: Int64) {
+    public static func populateDiskAndCacheStats(for item: WorktreeItem) async -> (diskBytes: Int64, cacheDirs: [CacheDirItem], cacheBytes: Int64) {
         guard item.directoryExists else { return (0, [], 0) }
         async let totalSizeOut = ShellRunner.directorySizeBytes(item.path)
 
@@ -1093,7 +1093,7 @@ enum WorktreeScanner {
 
     // MARK: - 7. Diff 预览
 
-    static func fetchDiff(for item: WorktreeItem) async -> String {
+    public static func fetchDiff(for item: WorktreeItem) async -> String {
         guard item.directoryExists else { return "Directory no longer exists." }
         async let unstaged = ShellRunner.git(["diff", "--stat", "-p", "--no-color"], in: item.path)
         async let staged = ShellRunner.git(["diff", "--cached", "--stat", "-p", "--no-color"], in: item.path)
@@ -1123,7 +1123,7 @@ enum WorktreeScanner {
 
     // MARK: - 8. 只清构建缓存（保留代码）
 
-    static func cleanBuildCaches(for item: WorktreeItem) async -> Result<Int64, Error> {
+    public static func cleanBuildCaches(for item: WorktreeItem) async -> Result<Int64, Error> {
         let fm = FileManager.default
         var freed: Int64 = 0
         for cache in item.cacheDirs where fm.fileExists(atPath: cache.id) {
@@ -1139,7 +1139,7 @@ enum WorktreeScanner {
 
     // MARK: - 9. 一键拷回敏感被忽略文件到主仓库
 
-    static func copyPreciousFilesToMainRepo(for item: WorktreeItem) async -> Result<(copied: [String], skipped: [String]), Error> {
+    public static func copyPreciousFilesToMainRepo(for item: WorktreeItem) async -> Result<(copied: [String], skipped: [String]), Error> {
         let fm = FileManager.default
         guard !item.mainRepoPath.isEmpty, fm.fileExists(atPath: item.mainRepoPath) else {
             return .failure(CleanerError(message: "Main repository path does not exist."))
@@ -1169,7 +1169,7 @@ enum WorktreeScanner {
 
     // MARK: - 10. 快速推送到远端
 
-    static func pushWorktree(
+    public static func pushWorktree(
         _ item: WorktreeItem,
         branchName: String,
         commitMessage: String?,
@@ -1246,7 +1246,7 @@ enum WorktreeScanner {
 
     // MARK: - 11. 安全移除 Worktree（默认移入废纸篓后悔药 + Prune + 可选删本地分支）
 
-    static func removeWorktree(
+    public static func removeWorktree(
         _ item: WorktreeItem,
         backupCommitFirst: Bool = false,
         moveToTrash: Bool = true,
@@ -1347,7 +1347,7 @@ enum WorktreeScanner {
         return .success(())
     }
 
-    static func pruneAllMissing(items: [WorktreeItem]) async -> Int {
+    public static func pruneAllMissing(items: [WorktreeItem]) async -> Int {
         let repos = Set(items.filter { $0.isMissing && !$0.mainRepoPath.isEmpty }.map(\.mainRepoPath))
         var pruned = 0
         for repo in repos {
@@ -1372,8 +1372,9 @@ enum WorktreeScanner {
         }
     }
 
-    struct CleanerError: LocalizedError {
-        let message: String
-        var errorDescription: String? { message }
+    public struct CleanerError: LocalizedError {
+        public let message: String
+        public init(message: String) { self.message = message }
+        public var errorDescription: String? { message }
     }
 }

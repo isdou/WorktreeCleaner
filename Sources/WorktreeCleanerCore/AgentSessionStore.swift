@@ -2,11 +2,9 @@ import Foundation
 import SQLite3
 
 /// 只读提取 AI Coding Agent（Codex 与 Claude Code）的会话任务标题，用于唤醒用户的记忆
-enum AgentSessionStore {
+public enum AgentSessionStore {
 
-    // MARK: - 1. Codex (SQLite 只读索引)
-
-    static func loadCodexThreadTitles(dbPath: String? = nil) -> [String: [String]] {
+    public static func loadCodexThreadTitles(dbPath: String? = nil) -> [String: [String]] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let targetPath = dbPath ?? "\(home)/.codex/state_5.sqlite"
         guard FileManager.default.fileExists(atPath: targetPath) else { return [:] }
@@ -41,14 +39,11 @@ enum AgentSessionStore {
         return map
     }
 
-    // MARK: - 2. Claude Code (~/.claude/projects/*.jsonl)
-
-    /// 将物理路径编码为 Claude Code projects 目录名（非字母数字字符一律替换为 '-'）
-    static func encodeClaudeProjectName(_ path: String) -> String {
+    public static func encodeClaudeProjectName(_ path: String) -> String {
         path.replacingOccurrences(of: "[^A-Za-z0-9]", with: "-", options: .regularExpression)
     }
 
-    static func loadClaudeSessionTitles(
+    public static func loadClaudeSessionTitles(
         for paths: [String],
         projectsRoot: String? = nil
     ) -> [String: [String]] {
@@ -73,7 +68,6 @@ enum AgentSessionStore {
                 guard fm.fileExists(atPath: projectDir),
                       let entries = try? fm.contentsOfDirectory(atPath: projectDir) else { continue }
 
-                // 按文件修改时间降序取最新的 5 个 jsonl 文件
                 let jsonlFiles: [(path: String, date: Date)] = entries
                     .filter { $0.hasSuffix(".jsonl") }
                     .compactMap { file in
@@ -105,8 +99,7 @@ enum AgentSessionStore {
         return result
     }
 
-    /// 从 Claude JSONL 文件前若干行中提取最有代表性的任务标题或首条用户指令
-    static func extractClaudeTitle(fromJSONLLines lines: [String]) -> String? {
+    public static func extractClaudeTitle(fromJSONLLines lines: [String]) -> String? {
         var fallbackUserPrompt: String?
 
         for rawLine in lines {
@@ -116,7 +109,6 @@ enum AgentSessionStore {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let type = obj["type"] as? String else { continue }
 
-            // 1. 优先提取显式会话标题或摘要
             if type == "custom-title", let title = obj["customTitle"] as? String {
                 let cleaned = normalizeSnippet(title, maxLength: 140)
                 if !cleaned.isEmpty { return cleaned }
@@ -126,7 +118,6 @@ enum AgentSessionStore {
                 if !cleaned.isEmpty { return cleaned }
             }
 
-            // 2. 记录首条有效 user 文本作为回退
             if fallbackUserPrompt == nil, type == "user",
                let message = obj["message"] as? [String: Any],
                let content = message["content"] as? String {
@@ -140,8 +131,7 @@ enum AgentSessionStore {
         return fallbackUserPrompt
     }
 
-    /// 过滤系统命令标签并压缩空白字符
-    static func sanitizeUserPrompt(_ raw: String) -> String {
+    public static func sanitizeUserPrompt(_ raw: String) -> String {
         let stripped = raw
             .replacingOccurrences(of: "<local-command-[^>]*>[\\s\\S]*?</local-command-[^>]*>", with: " ", options: .regularExpression)
             .replacingOccurrences(of: "<command-name>[\\s\\S]*?</command-name>", with: " ", options: .regularExpression)

@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AppKit
+import WorktreeCleanerCore
 
 /// 全局状态管理与动作调度中心
 @MainActor

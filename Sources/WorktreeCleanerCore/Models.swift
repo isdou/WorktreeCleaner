@@ -2,14 +2,14 @@ import Foundation
 import SwiftUI
 
 /// Worktree 来源分类
-enum WorktreeSource: String, Codable, CaseIterable, Sendable {
+public enum WorktreeSource: String, Codable, CaseIterable, Sendable {
     case codex = "Codex"
     case claude = "Claude"
     case cursor = "Cursor"
     case trae = "Trae"
     case local = "Local"
 
-    var color: Color {
+    public var color: Color {
         switch self {
         case .codex: return .blue
         case .claude: return .orange
@@ -19,7 +19,7 @@ enum WorktreeSource: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    var icon: String {
+    public var icon: String {
         switch self {
         case .codex: return "terminal"
         case .claude: return "sparkles"
@@ -31,25 +31,34 @@ enum WorktreeSource: String, Codable, CaseIterable, Sendable {
 }
 
 /// Worktree 物理与 Git 形态分类
-enum WorktreeKind: String, Sendable {
-    case linkedWorktree      // 正常关联到主仓库的子 Worktree
-    case prunableMetadata    // 磁盘目录已丢失，仅剩 Git 幽灵元数据
-    case brokenGitOrphan     // 存在 .git 文件但指向的主仓库/gitdir 已删除
-    case directoryOrphan     // Agent worktree 目录下无 .git 的残骸目录
+public enum WorktreeKind: String, Sendable {
+    case linkedWorktree
+    case prunableMetadata
+    case brokenGitOrphan
+    case directoryOrphan
 }
 
 /// Worktree 安全清理等级
-enum SafetyLevel: Int, Comparable, CaseIterable, Sendable {
-    case missing = 0   // 幽灵元数据
-    case safe = 1      // 干净且已同步/合并，安全可删
-    case caution = 2   // 待确认（未推送、含敏感忽略文件、或孤儿残骸）
-    case danger = 3    // 有未提交改动、被锁定、或有进程运行中
+public enum SafetyLevel: Int, Comparable, CaseIterable, Sendable {
+    case missing = 0
+    case safe = 1
+    case caution = 2
+    case danger = 3
 
-    static func < (lhs: SafetyLevel, rhs: SafetyLevel) -> Bool {
+    public static func < (lhs: SafetyLevel, rhs: SafetyLevel) -> Bool {
         lhs.rawValue < rhs.rawValue
     }
 
-    func label(language: AppLanguage) -> String {
+    public var key: String {
+        switch self {
+        case .missing: return "missing"
+        case .safe: return "safe"
+        case .caution: return "caution"
+        case .danger: return "danger"
+        }
+    }
+
+    public func label(language: AppLanguage) -> String {
         switch self {
         case .missing: return L10n.tr("幽灵记录", "Ghost", language: language)
         case .safe: return L10n.tr("安全可删", "Safe", language: language)
@@ -58,7 +67,7 @@ enum SafetyLevel: Int, Comparable, CaseIterable, Sendable {
         }
     }
 
-    var color: Color {
+    public var color: Color {
         switch self {
         case .missing: return .secondary
         case .safe: return .green
@@ -67,7 +76,7 @@ enum SafetyLevel: Int, Comparable, CaseIterable, Sendable {
         }
     }
 
-    var sfSymbol: String {
+    public var sfSymbol: String {
         switch self {
         case .missing: return "questionmark.folder"
         case .safe: return "checkmark.shield.fill"
@@ -77,18 +86,23 @@ enum SafetyLevel: Int, Comparable, CaseIterable, Sendable {
     }
 }
 
-/// 单个文件变更项（来自 git status --porcelain）
-struct ChangedFileItem: Identifiable, Hashable, Sendable {
-    let id = UUID()
-    let statusCode: String
-    let path: String
+/// 单个文件变更项
+public struct ChangedFileItem: Identifiable, Hashable, Sendable {
+    public let id = UUID()
+    public let statusCode: String
+    public let path: String
 
-    var badgeText: String {
+    public init(statusCode: String, path: String) {
+        self.statusCode = statusCode
+        self.path = path
+    }
+
+    public var badgeText: String {
         let trimmed = statusCode.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? "M" : trimmed
     }
 
-    var badgeColor: Color {
+    public var badgeColor: Color {
         if statusCode.contains("?") { return .orange }
         if statusCode.contains("D") { return .red }
         if statusCode.contains("A") { return .green }
@@ -97,39 +111,63 @@ struct ChangedFileItem: Identifiable, Hashable, Sendable {
 }
 
 /// 未推送提交项
-struct UnpushedCommit: Identifiable, Hashable, Sendable {
-    let id: String // short hash
-    let message: String
+public struct UnpushedCommit: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let message: String
+
+    public init(id: String, message: String) {
+        self.id = id
+        self.message = message
+    }
 }
 
 /// 相对主分支新增的提交记录
-struct BranchCommit: Identifiable, Hashable, Sendable {
-    let id: String // short hash
-    let relativeDate: String
-    let subject: String
+public struct BranchCommit: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let relativeDate: String
+    public let subject: String
+
+    public init(id: String, relativeDate: String, subject: String) {
+        self.id = id
+        self.relativeDate = relativeDate
+        self.subject = subject
+    }
 }
 
 /// 相对主分支改动的文件行数统计
-struct DiffFileStat: Identifiable, Hashable, Sendable {
-    let id: String // path
-    let path: String
-    let insertions: Int
-    let deletions: Int
+public struct DiffFileStat: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let path: String
+    public let insertions: Int
+    public let deletions: Int
 
-    var totalDelta: Int { insertions + deletions }
+    public init(id: String, path: String, insertions: Int, deletions: Int) {
+        self.id = id
+        self.path = path
+        self.insertions = insertions
+        self.deletions = deletions
+    }
+
+    public var totalDelta: Int { insertions + deletions }
 }
 
-/// GitHub PR 关联状态（通过 gh CLI 可选获取）
-struct PullRequestInfo: Hashable, Sendable {
-    let number: Int
-    let state: String // OPEN, MERGED, CLOSED
-    let url: String
+/// GitHub PR 关联状态
+public struct PullRequestInfo: Hashable, Sendable {
+    public let number: Int
+    public let state: String
+    public let url: String
 
-    var isMerged: Bool {
+    public init(number: Int, state: String, url: String) {
+        self.number = number
+        self.state = state
+        self.url = url
+    }
+
+    public var isMerged: Bool {
         state.uppercased() == "MERGED"
     }
 
-    func badgeText(language: AppLanguage) -> String {
+    public func badgeText(language: AppLanguage) -> String {
         switch state.uppercased() {
         case "MERGED": return L10n.tr("PR #\(number) 已合并", "PR #\(number) Merged", language: language)
         case "CLOSED": return L10n.tr("PR #\(number) 已关闭", "PR #\(number) Closed", language: language)
@@ -137,7 +175,7 @@ struct PullRequestInfo: Hashable, Sendable {
         }
     }
 
-    var badgeColor: Color {
+    public var badgeColor: Color {
         switch state.uppercased() {
         case "MERGED": return .purple
         case "CLOSED": return .secondary
@@ -147,91 +185,176 @@ struct PullRequestInfo: Hashable, Sendable {
 }
 
 /// 可再生构建与依赖缓存目录项
-struct CacheDirItem: Identifiable, Hashable, Sendable {
-    let id: String // full path
-    let relativePath: String
-    let sizeBytes: Int64
+public struct CacheDirItem: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let relativePath: String
+    public let sizeBytes: Int64
+
+    public init(id: String, relativePath: String, sizeBytes: Int64) {
+        self.id = id
+        self.relativePath = relativePath
+        self.sizeBytes = sizeBytes
+    }
 }
 
 /// Worktree 做了什么功能的完整摘要
-struct FeatureSummary: Hashable, Sendable {
-    let baseBranch: String?
-    let totalCommitCount: Int
-    let branchCommits: [BranchCommit]
-    let filesChangedCount: Int
-    let insertions: Int
-    let deletions: Int
-    let touchedAreas: [String]
-    let topFiles: [DiffFileStat]
-    let agentTasks: [String]
+public struct FeatureSummary: Hashable, Sendable {
+    public let baseBranch: String?
+    public let totalCommitCount: Int
+    public let branchCommits: [BranchCommit]
+    public let filesChangedCount: Int
+    public let insertions: Int
+    public let deletions: Int
+    public let touchedAreas: [String]
+    public let topFiles: [DiffFileStat]
+    public let agentTasks: [String]
 
-    var hasBranchWork: Bool {
+    public init(
+        baseBranch: String?,
+        totalCommitCount: Int,
+        branchCommits: [BranchCommit],
+        filesChangedCount: Int,
+        insertions: Int,
+        deletions: Int,
+        touchedAreas: [String],
+        topFiles: [DiffFileStat],
+        agentTasks: [String]
+    ) {
+        self.baseBranch = baseBranch
+        self.totalCommitCount = totalCommitCount
+        self.branchCommits = branchCommits
+        self.filesChangedCount = filesChangedCount
+        self.insertions = insertions
+        self.deletions = deletions
+        self.touchedAreas = touchedAreas
+        self.topFiles = topFiles
+        self.agentTasks = agentTasks
+    }
+
+    public var hasBranchWork: Bool {
         totalCommitCount > 0 || filesChangedCount > 0
     }
 }
 
 /// 单个 Git Worktree 的完整体检信息
-struct WorktreeItem: Identifiable, Hashable, Sendable {
-    let id: String // canonical path
-    let path: String
-    let kind: WorktreeKind
-    let mainRepoPath: String
-    let mainRepoName: String
-    let branch: String
-    let headCommit: String
-    let headSubject: String
-    let lastModified: Date?
-    let isDetached: Bool
-    let isLocked: Bool
-    let directoryExists: Bool
-    let source: WorktreeSource
-    let remoteName: String?
+public struct WorktreeItem: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let path: String
+    public let kind: WorktreeKind
+    public let mainRepoPath: String
+    public let mainRepoName: String
+    public let branch: String
+    public let headCommit: String
+    public let headSubject: String
+    public let lastModified: Date?
+    public let isDetached: Bool
+    public let isLocked: Bool
+    public let directoryExists: Bool
+    public let source: WorktreeSource
+    public let remoteName: String?
 
-    // Git 体检指标
-    let modifiedCount: Int
-    let untrackedCount: Int
-    let aheadCount: Int
-    let hasUpstream: Bool
-    let isMergedToDefault: Bool
-    let isSquashMerged: Bool
-    let prInfo: PullRequestInfo?
-    let changedFiles: [ChangedFileItem]
-    let unpushedCommits: [UnpushedCommit]
+    public let modifiedCount: Int
+    public let untrackedCount: Int
+    public let aheadCount: Int
+    public let hasUpstream: Bool
+    public let isMergedToDefault: Bool
+    public let isSquashMerged: Bool
+    public let prInfo: PullRequestInfo?
+    public let changedFiles: [ChangedFileItem]
+    public let unpushedCommits: [UnpushedCommit]
 
-    // 高级防误删护栏指标
-    let activeProcesses: [String]
-    let preciousIgnoredFiles: [String]
-    let orphanFileCount: Int
+    public let activeProcesses: [String]
+    public let preciousIgnoredFiles: [String]
+    public let orphanFileCount: Int
 
-    // 功能演进摘要
-    let featureSummary: FeatureSummary?
+    public let featureSummary: FeatureSummary?
 
-    // 磁盘占用与可清理缓存（异步填充）
-    var diskSizeBytes: Int64?
-    var cacheDirs: [CacheDirItem] = []
-    var reclaimableCacheBytes: Int64 = 0
+    public var diskSizeBytes: Int64?
+    public var cacheDirs: [CacheDirItem] = []
+    public var reclaimableCacheBytes: Int64 = 0
 
-    var folderName: String {
+    public init(
+        id: String,
+        path: String,
+        kind: WorktreeKind,
+        mainRepoPath: String,
+        mainRepoName: String,
+        branch: String,
+        headCommit: String,
+        headSubject: String,
+        lastModified: Date?,
+        isDetached: Bool,
+        isLocked: Bool,
+        directoryExists: Bool,
+        source: WorktreeSource,
+        remoteName: String?,
+        modifiedCount: Int,
+        untrackedCount: Int,
+        aheadCount: Int,
+        hasUpstream: Bool,
+        isMergedToDefault: Bool,
+        isSquashMerged: Bool,
+        prInfo: PullRequestInfo?,
+        changedFiles: [ChangedFileItem],
+        unpushedCommits: [UnpushedCommit],
+        activeProcesses: [String],
+        preciousIgnoredFiles: [String],
+        orphanFileCount: Int,
+        featureSummary: FeatureSummary?,
+        diskSizeBytes: Int64?,
+        cacheDirs: [CacheDirItem] = [],
+        reclaimableCacheBytes: Int64 = 0
+    ) {
+        self.id = id
+        self.path = path
+        self.kind = kind
+        self.mainRepoPath = mainRepoPath
+        self.mainRepoName = mainRepoName
+        self.branch = branch
+        self.headCommit = headCommit
+        self.headSubject = headSubject
+        self.lastModified = lastModified
+        self.isDetached = isDetached
+        self.isLocked = isLocked
+        self.directoryExists = directoryExists
+        self.source = source
+        self.remoteName = remoteName
+        self.modifiedCount = modifiedCount
+        self.untrackedCount = untrackedCount
+        self.aheadCount = aheadCount
+        self.hasUpstream = hasUpstream
+        self.isMergedToDefault = isMergedToDefault
+        self.isSquashMerged = isSquashMerged
+        self.prInfo = prInfo
+        self.changedFiles = changedFiles
+        self.unpushedCommits = unpushedCommits
+        self.activeProcesses = activeProcesses
+        self.preciousIgnoredFiles = preciousIgnoredFiles
+        self.orphanFileCount = orphanFileCount
+        self.featureSummary = featureSummary
+        self.diskSizeBytes = diskSizeBytes
+        self.cacheDirs = cacheDirs
+        self.reclaimableCacheBytes = reclaimableCacheBytes
+    }
+
+    public var folderName: String {
         URL(fileURLWithPath: path).lastPathComponent
     }
 
-    var isOrphan: Bool {
+    public var isOrphan: Bool {
         kind == .brokenGitOrphan || kind == .directoryOrphan
     }
 
-    var isMissing: Bool {
+    public var isMissing: Bool {
         kind == .prunableMetadata
     }
 
-    var isEffectivelyMerged: Bool {
+    public var isEffectivelyMerged: Bool {
         isMergedToDefault || isSquashMerged || (prInfo?.isMerged == true)
     }
 
-    func displayBranch(language: AppLanguage) -> String {
-        if kind == .brokenGitOrphan {
-            return folderName
-        }
-        if kind == .directoryOrphan {
+    public func displayBranch(language: AppLanguage) -> String {
+        if kind == .brokenGitOrphan || kind == .directoryOrphan {
             return folderName
         }
         if !branch.isEmpty { return branch }
@@ -239,74 +362,57 @@ struct WorktreeItem: Identifiable, Hashable, Sendable {
         return L10n.tr("未知分支", "Unknown Branch", language: language)
     }
 
-    var isDirty: Bool {
+    public var isDirty: Bool {
         modifiedCount > 0 || untrackedCount > 0
     }
 
-    /// 是否处于新鲜度冷却保护窗口内（刚新建/刚改动过的干净目录不纳入一键全选）
-    func isWithinFreshnessWindow(hours: Int, now: Date = Date()) -> Bool {
+    public func isWithinFreshnessWindow(hours: Int, now: Date = Date()) -> Bool {
         guard hours > 0, directoryExists, !isOrphan, !isMissing, let lastModified else {
             return false
         }
         return now.timeIntervalSince(lastModified) < TimeInterval(hours) * 3600
     }
 
-    /// 是否允许通过“全选安全项”自动勾选
-    func isAutoSelectableSafe(freshnessHours: Int, now: Date = Date()) -> Bool {
+    public func isAutoSelectableSafe(freshnessHours: Int, now: Date = Date()) -> Bool {
         guard safetyLevel == .safe || safetyLevel == .missing else { return false }
         return !isWithinFreshnessWindow(hours: freshnessHours, now: now)
     }
 
-    /// 综合安全等级判定
-    var safetyLevel: SafetyLevel {
-        if kind == .prunableMetadata {
-            return .missing
-        }
-        if !activeProcesses.isEmpty || isDirty || isLocked {
-            return .danger
-        }
-        if isOrphan {
-            return .caution
-        }
-        if !preciousIgnoredFiles.isEmpty {
-            return .caution
-        }
-        if aheadCount > 0 {
-            return .caution
-        }
-        if !hasUpstream && !isEffectivelyMerged {
-            return .caution
-        }
+    public var safetyLevel: SafetyLevel {
+        if kind == .prunableMetadata { return .missing }
+        if !activeProcesses.isEmpty || isDirty || isLocked { return .danger }
+        if isOrphan { return .caution }
+        if !preciousIgnoredFiles.isEmpty { return .caution }
+        if aheadCount > 0 { return .caution }
+        if !hasUpstream && !isEffectivelyMerged { return .caution }
         return .safe
     }
 
-    var formattedSize: String {
+    public var formattedSize: String {
         guard let bytes = diskSizeBytes else { return "…" }
         return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    var formattedCacheSize: String {
+    public var formattedCacheSize: String {
         ByteCountFormatter.string(fromByteCount: reclaimableCacheBytes, countStyle: .file)
     }
 
-    /// 是否可以推送到远端
-    var canPush: Bool {
+    public var canPush: Bool {
         directoryExists && !isMissing && !isOrphan && remoteName != nil
     }
 
-    var needsPush: Bool {
+    public var needsPush: Bool {
         guard canPush else { return false }
         return isDirty || aheadCount > 0 || (!hasUpstream && !isEffectivelyMerged)
     }
 
-    /// 是否适合顺手删除对应的本地分支
-    var canDeleteLocalBranch: Bool {
+    public var canDeleteLocalBranch: Bool {
         guard !isOrphan, !isMissing, !isDetached, !branch.isEmpty else { return false }
         let protected: Set<String> = ["main", "master", "develop", "dev", "prd", "production", "staging"]
         return !protected.contains(branch.lowercased())
     }
 
-    var suggestedCommitMessage: String {
+    public var suggestedCommitMessage: String {
         if let firstTask = featureSummary?.agentTasks.first, !firstTask.isEmpty {
             let cleaned = firstTask
                 .replacingOccurrences(of: "\n", with: " ")
@@ -319,7 +425,7 @@ struct WorktreeItem: Identifiable, Hashable, Sendable {
         return "wip: save worktree changes"
     }
 
-    var suggestedPushBranchName: String {
+    public var suggestedPushBranchName: String {
         if !branch.isEmpty && !isDetached {
             return branch
         }
@@ -331,7 +437,7 @@ struct WorktreeItem: Identifiable, Hashable, Sendable {
         return "wt/\(base)"
     }
 
-    func safetySummary(language: AppLanguage, freshnessHours: Int = 24) -> String {
+    public func safetySummary(language: AppLanguage, freshnessHours: Int = 24) -> String {
         if kind == .prunableMetadata {
             return L10n.tr(
                 "磁盘目录已不存在，清理仅移除 Git 残留元数据，零风险。",
@@ -420,16 +526,16 @@ struct WorktreeItem: Identifiable, Hashable, Sendable {
 }
 
 /// 筛选标签
-enum WorktreeFilter: String, CaseIterable, Identifiable {
+public enum WorktreeFilter: String, CaseIterable, Identifiable, Sendable {
     case all
     case safe
     case caution
     case danger
     case missing
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    func title(language: AppLanguage) -> String {
+    public func title(language: AppLanguage) -> String {
         switch self {
         case .all: return L10n.tr("全部", "All", language: language)
         case .safe: return L10n.tr("安全", "Safe", language: language)
@@ -439,7 +545,7 @@ enum WorktreeFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    func matches(_ item: WorktreeItem) -> Bool {
+    public func matches(_ item: WorktreeItem) -> Bool {
         switch self {
         case .all: return true
         case .safe: return item.safetyLevel == .safe
@@ -451,18 +557,32 @@ enum WorktreeFilter: String, CaseIterable, Identifiable {
 }
 
 /// 清理结果
-struct CleanupReport: Identifiable, Sendable {
-    let id = UUID()
-    let succeededCount: Int
-    let failedItems: [(path: String, error: String)]
-    let freedBytes: Int64
-    let movedToTrash: Bool
+public struct CleanupReport: Identifiable, Sendable {
+    public let id = UUID()
+    public let succeededCount: Int
+    public let failedItems: [(path: String, error: String)]
+    public let freedBytes: Int64
+    public let movedToTrash: Bool
+
+    public init(succeededCount: Int, failedItems: [(path: String, error: String)], freedBytes: Int64, movedToTrash: Bool) {
+        self.succeededCount = succeededCount
+        self.failedItems = failedItems
+        self.freedBytes = freedBytes
+        self.movedToTrash = movedToTrash
+    }
 }
 
 /// 推送结果
-struct PushResultInfo: Sendable {
-    let remote: String
-    let branch: String
-    let committedChanges: Bool
-    let removedAfterPush: Bool
+public struct PushResultInfo: Sendable {
+    public let remote: String
+    public let branch: String
+    public let committedChanges: Bool
+    public let removedAfterPush: Bool
+
+    public init(remote: String, branch: String, committedChanges: Bool, removedAfterPush: Bool) {
+        self.remote = remote
+        self.branch = branch
+        self.committedChanges = committedChanges
+        self.removedAfterPush = removedAfterPush
+    }
 }
