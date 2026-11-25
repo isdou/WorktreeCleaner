@@ -98,10 +98,68 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Worktree Cleaner scans Git repositories on your Desktop to detect and clean up stale worktrees.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Worktree Cleaner scans Git repositories in Downloads to detect and clean up stale worktrees.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Worktree Cleaner scans Git repositories in Documents to detect and clean up stale worktrees.</string>
 </dict>
+</plist>
 PLIST
 
-codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null 2>&1 || true
+# 自动探测本机签名证书：优先 CODESIGN_IDENTITY -> Developer ID Application -> Apple Development -> ad-hoc ("-")
+resolve_signing_identity() {
+  if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+    echo "$CODESIGN_IDENTITY"
+    return
+  fi
+
+  local identities
+  identities="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+
+  local dev_id
+  dev_id="$(printf '%s\n' "$identities" | grep -m1 '"Developer ID Application:' | awk '{print $2}' || true)"
+  if [[ -n "$dev_id" ]]; then
+    echo "$dev_id"
+    return
+  fi
+
+  local apple_dev
+  apple_dev="$(printf '%s\n' "$identities" | grep -m1 '"Apple Development:' | awk '{print $2}' || true)"
+  if [[ -n "$apple_dev" ]]; then
+    echo "$apple_dev"
+    return
+  fi
+
+  echo "-"
+}
+
+SIGN_IDENTITY="$(resolve_signing_identity)"
+echo "🔏 Signing with identity: $SIGN_IDENTITY"
+
+sign_with_identity() {
+  local id="$1"
+  if [[ "$id" == "-" ]]; then
+    codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null 2>&1
+  else
+    codesign --force --deep --options runtime --sign "$id" "$APP_BUNDLE" >/dev/null 2>&1
+  fi
+}
+
+if ! sign_with_identity "$SIGN_IDENTITY"; then
+  if [[ "$SIGN_IDENTITY" != "-" ]]; then
+    echo "⚠️ Signing with $SIGN_IDENTITY failed (e.g., locked keychain), falling back..."
+    FALLBACK_APPLE_DEV="$(security find-identity -v -p codesigning 2>/dev/null | grep -m1 '"Apple Development:' | awk '{print $2}' || true)"
+    if [[ -n "$FALLBACK_APPLE_DEV" && "$FALLBACK_APPLE_DEV" != "$SIGN_IDENTITY" ]] && sign_with_identity "$FALLBACK_APPLE_DEV"; then
+      echo "✅ Signed with fallback Apple Development identity: $FALLBACK_APPLE_DEV"
+    else
+      sign_with_identity "-" || true
+      echo "✅ Signed with ad-hoc identity (-)"
+    fi
+  fi
+fi
+
 echo "✅ Built app: $APP_BUNDLE"
 
 if [[ "$BUILD_ZIP" == true ]]; then

@@ -25,6 +25,7 @@ jobs:
       - name: Build Universal .app, .dmg, and .zip
         env:
           VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '1.0.0' }}
+          CODESIGN_IDENTITY: "-"
         run: |
           CLEAN_VERSION="${VERSION#v}"
           chmod +x scripts/build_app.sh

@@ -128,6 +128,30 @@ struct WorktreeCleanerTests {
         #expect(orphan.isOrphan == true)
     }
 
+    @Test("TCC protected root matching and denied-path skipping")
+    func testTCCProtectedRootMatching() {
+        let protected = [
+            "/Users/alex/Desktop",
+            "/Users/alex/Downloads",
+            "/Users/alex/Documents"
+        ]
+        let candidatePaths = [
+            "/Users/alex/Projects/demo",
+            "/Users/alex/Desktop/Gemini/WorktreeCleaner",
+            "/Users/alex/Downloads/AI-Hub",
+            "/Users/alex/DesktopTools/other"
+        ]
+
+        let matched = WorktreeScanner.matchingProtectedRoots(for: candidatePaths, protectedRoots: protected)
+        #expect(matched == ["/Users/alex/Desktop", "/Users/alex/Downloads"])
+
+        let denied: Set<String> = ["/Users/alex/Desktop"]
+        #expect(WorktreeScanner.isPath("/Users/alex/Desktop", underAnyOf: denied) == true)
+        #expect(WorktreeScanner.isPath("/Users/alex/Desktop/repo", underAnyOf: denied) == true)
+        #expect(WorktreeScanner.isPath("/Users/alex/DesktopTools/repo", underAnyOf: denied) == false)
+        #expect(WorktreeScanner.isPath("/Users/alex/Projects/repo", underAnyOf: denied) == false)
+    }
+
     // MARK: - Helpers
 
     private func makeSampleItem(

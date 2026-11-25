@@ -23,6 +23,8 @@ enum ShellRunner {
                 process.arguments = arguments
                 if let dir = currentDirectory, FileManager.default.fileExists(atPath: dir) {
                     process.currentDirectoryURL = URL(fileURLWithPath: dir)
+                } else {
+                    process.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
                 }
 
                 // 避免 git 触发交互式凭证弹窗，保持英文输出便于统一解析

@@ -29,6 +29,16 @@ enum WorktreeScanner {
         ]
     }
 
+    /// 受 macOS TCC 隐私保护的常见用户目录
+    static var protectedTCCRoots: [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return [
+            canonicalPath("\(home)/Desktop"),
+            canonicalPath("\(home)/Downloads"),
+            canonicalPath("\(home)/Documents")
+        ]
+    }
+
     private static let skipDiscoveryNames: Set<String> = [
         "node_modules", "Pods", "Carthage", "DerivedData", "build", "dist",
         "target", ".build", ".swiftpm", ".venv", "venv", "__pycache__",
@@ -44,7 +54,9 @@ enum WorktreeScanner {
     // MARK: - 1. 全量扫描入口
 
     static func scanAll(searchRoots: [String]) async -> [WorktreeItem] {
-        let discovery = discoverRepositoriesAndOrphans(searchRoots: searchRoots)
+        // 先串行预检受 TCC 保护的目录，避免后续并发 git/du 子进程同时撞门引发多次弹窗
+        let deniedRoots = preflightProtectedRoots(neededFor: searchRoots)
+        let discovery = discoverRepositoriesAndOrphans(searchRoots: searchRoots, deniedRoots: deniedRoots)
 
         // 1. 并发拉取所有有效主仓库下的关联 worktree 列表，以及进程占用快照 & Codex 会话意图
         async let lsofOut = ShellRunner.run("/usr/sbin/lsof", arguments: ["-a", "-d", "cwd", "-Fpcn"], timeout: 5)
@@ -63,13 +75,16 @@ enum WorktreeScanner {
             }
         }
 
-        // 去重并过滤主仓库自身（主仓库受永久保护）
+        // 去重并过滤主仓库自身及被用户拒绝的受保护目录
         var seenPaths = Set<String>()
         var childTargets: [(mainRepo: String, entry: PorcelainEntry)] = []
         for item in rawEntries {
             let normMain = canonicalPath(item.mainRepo)
             let normPath = canonicalPath(item.entry.path)
             if normPath == normMain { continue }
+            if isPath(normMain, underAnyOf: deniedRoots) || isPath(normPath, underAnyOf: deniedRoots) {
+                continue
+            }
             if seenPaths.insert(normPath).inserted {
                 childTargets.append((normMain, item.entry))
             }
@@ -155,6 +170,96 @@ enum WorktreeScanner {
         }
     }
 
+    // MARK: - 1.5 TCC 受保护目录串行预检门禁
+
+    static func isPath(_ path: String, underAnyOf roots: Set<String>) -> Bool {
+        let norm = canonicalPath(path)
+        for root in roots {
+            let normRoot = canonicalPath(root)
+            if norm == normRoot || norm.hasPrefix(normRoot + "/") {
+                return true
+            }
+        }
+        return false
+    }
+
+    static func matchingProtectedRoots(
+        for paths: [String],
+        protectedRoots: [String] = protectedTCCRoots
+    ) -> [String] {
+        var matched: [String] = []
+        for tccRoot in protectedRoots {
+            let normRoot = canonicalPath(tccRoot)
+            let needsRoot = paths.contains { path in
+                let normPath = canonicalPath(path)
+                return normPath == normRoot || normPath.hasPrefix(normRoot + "/")
+            }
+            if needsRoot {
+                matched.append(normRoot)
+            }
+        }
+        return matched
+    }
+
+    /// 仅从非受保护的 ~/.codex/worktrees 等目录读取 .git 文件内容，反推可能涉及的主仓库路径
+    private static func collectAgentLinkedMainRepoPaths() -> [String] {
+        let fm = FileManager.default
+        var linkedMains: [String] = []
+
+        func extractMainRepo(at dirPath: String) -> String? {
+            let gitPath = (dirPath as NSString).appendingPathComponent(".git")
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: gitPath, isDirectory: &isDir), !isDir.boolValue else { return nil }
+            guard let content = try? String(contentsOfFile: gitPath, encoding: .utf8),
+                  let range = content.range(of: "gitdir:") else { return nil }
+            let rawGitDir = content[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+            if let wtRange = rawGitDir.range(of: "/.git/worktrees/") {
+                return canonicalPath(String(rawGitDir[..<wtRange.lowerBound]))
+            }
+            return nil
+        }
+
+        for agentRoot in agentWorktreeRoots {
+            guard fm.fileExists(atPath: agentRoot),
+                  let level1 = try? fm.contentsOfDirectory(atPath: agentRoot) else { continue }
+            for name1 in level1 where !name1.hasPrefix(".") {
+                let path1 = (agentRoot as NSString).appendingPathComponent(name1)
+                if let main = extractMainRepo(at: path1) {
+                    linkedMains.append(main)
+                    continue
+                }
+                guard let level2 = try? fm.contentsOfDirectory(atPath: path1) else { continue }
+                for name2 in level2 where !name2.hasPrefix(".") {
+                    let path2 = (path1 as NSString).appendingPathComponent(name2)
+                    if let main = extractMainRepo(at: path2) {
+                        linkedMains.append(main)
+                    }
+                }
+            }
+        }
+        return linkedMains
+    }
+
+    /// 在主进程内串行预检一次受 TCC 保护的根目录；若用户拒绝授权，返回被拒绝根目录集合以便后续跳过
+    private static func preflightProtectedRoots(neededFor searchRoots: [String]) -> Set<String> {
+        let candidatePaths = searchRoots + collectAgentLinkedMainRepoPaths()
+        let rootsToCheck = matchingProtectedRoots(for: candidatePaths)
+        let fm = FileManager.default
+        var denied = Set<String>()
+
+        for tccRoot in rootsToCheck {
+            do {
+                _ = try fm.contentsOfDirectory(atPath: tccRoot)
+            } catch let error as NSError {
+                if (error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoPermissionError)
+                    || (error.domain == NSPOSIXErrorDomain && (error.code == EPERM || error.code == EACCES)) {
+                    denied.insert(tccRoot)
+                }
+            }
+        }
+        return denied
+    }
+
     // MARK: - 2. 仓库与孤儿目录发现（2 层目录 + Agent 目录物理对账）
 
     private struct DiscoveryResult {
@@ -163,19 +268,27 @@ enum WorktreeScanner {
         var directoryOrphans: [String]
     }
 
-    private static func discoverRepositoriesAndOrphans(searchRoots: [String]) -> DiscoveryResult {
+    private static func discoverRepositoriesAndOrphans(
+        searchRoots: [String],
+        deniedRoots: Set<String>
+    ) -> DiscoveryResult {
         let fm = FileManager.default
         var repos = Set<String>()
         var brokenOrphans = Set<String>()
         var directoryOrphans = Set<String>()
 
         func inspectGitFolder(_ dirPath: String) -> Bool {
+            if isPath(dirPath, underAnyOf: deniedRoots) { return false }
             switch classifyGitFolder(dirPath) {
             case .mainRepo(let mainPath):
-                repos.insert(canonicalPath(mainPath))
+                if !isPath(mainPath, underAnyOf: deniedRoots) {
+                    repos.insert(canonicalPath(mainPath))
+                }
                 return true
             case .linkedWorktree(let mainPath):
-                repos.insert(canonicalPath(mainPath))
+                if !isPath(mainPath, underAnyOf: deniedRoots) {
+                    repos.insert(canonicalPath(mainPath))
+                }
                 return true
             case .brokenOrphan:
                 brokenOrphans.insert(canonicalPath(dirPath))
@@ -187,6 +300,7 @@ enum WorktreeScanner {
 
         // A. 用户目录 0 -> 1 -> 2 层发现
         for root in searchRoots {
+            if isPath(root, underAnyOf: deniedRoots) { continue }
             guard fm.fileExists(atPath: root) else { continue }
             _ = inspectGitFolder(root)
 
@@ -200,7 +314,13 @@ enum WorktreeScanner {
                 // 如果一层已是主仓库，再检查其内置 .claude/worktrees 与 .worktrees
                 if wasGit1 {
                     for hiddenWtRoot in ["\(path1)/.claude/worktrees", "\(path1)/.worktrees"] {
-                        scanAgentWorktreeDir(hiddenWtRoot, repos: &repos, brokenOrphans: &brokenOrphans, directoryOrphans: &directoryOrphans)
+                        scanAgentWorktreeDir(
+                            hiddenWtRoot,
+                            deniedRoots: deniedRoots,
+                            repos: &repos,
+                            brokenOrphans: &brokenOrphans,
+                            directoryOrphans: &directoryOrphans
+                        )
                     }
                     continue
                 }
@@ -213,7 +333,13 @@ enum WorktreeScanner {
                     guard fm.fileExists(atPath: path2, isDirectory: &isDir2), isDir2.boolValue else { continue }
                     if inspectGitFolder(path2) {
                         for hiddenWtRoot in ["\(path2)/.claude/worktrees", "\(path2)/.worktrees"] {
-                            scanAgentWorktreeDir(hiddenWtRoot, repos: &repos, brokenOrphans: &brokenOrphans, directoryOrphans: &directoryOrphans)
+                            scanAgentWorktreeDir(
+                                hiddenWtRoot,
+                                deniedRoots: deniedRoots,
+                                repos: &repos,
+                                brokenOrphans: &brokenOrphans,
+                                directoryOrphans: &directoryOrphans
+                            )
                         }
                     }
                 }
@@ -222,7 +348,13 @@ enum WorktreeScanner {
 
         // B. 扫描 AI Agent 专用 Worktree 根目录，并对无 .git 的残留目录做物理对账
         for agentRoot in agentWorktreeRoots {
-            scanAgentWorktreeDir(agentRoot, repos: &repos, brokenOrphans: &brokenOrphans, directoryOrphans: &directoryOrphans)
+            scanAgentWorktreeDir(
+                agentRoot,
+                deniedRoots: deniedRoots,
+                repos: &repos,
+                brokenOrphans: &brokenOrphans,
+                directoryOrphans: &directoryOrphans
+            )
         }
 
         return DiscoveryResult(
@@ -234,10 +366,12 @@ enum WorktreeScanner {
 
     private static func scanAgentWorktreeDir(
         _ root: String,
+        deniedRoots: Set<String>,
         repos: inout Set<String>,
         brokenOrphans: inout Set<String>,
         directoryOrphans: inout Set<String>
     ) {
+        if isPath(root, underAnyOf: deniedRoots) { return }
         let fm = FileManager.default
         guard fm.fileExists(atPath: root),
               let level1 = try? fm.contentsOfDirectory(atPath: root) else { return }
@@ -248,11 +382,10 @@ enum WorktreeScanner {
             guard fm.fileExists(atPath: path1, isDirectory: &isDir1), isDir1.boolValue else { continue }
 
             switch classifyGitFolder(path1) {
-            case .mainRepo(let main):
-                repos.insert(canonicalPath(main))
-                continue
-            case .linkedWorktree(let main):
-                repos.insert(canonicalPath(main))
+            case .mainRepo(let main), .linkedWorktree(let main):
+                if !isPath(main, underAnyOf: deniedRoots) {
+                    repos.insert(canonicalPath(main))
+                }
                 continue
             case .brokenOrphan:
                 brokenOrphans.insert(canonicalPath(path1))
@@ -270,7 +403,9 @@ enum WorktreeScanner {
                 guard fm.fileExists(atPath: path2, isDirectory: &isDir2), isDir2.boolValue else { continue }
                 switch classifyGitFolder(path2) {
                 case .mainRepo(let main), .linkedWorktree(let main):
-                    repos.insert(canonicalPath(main))
+                    if !isPath(main, underAnyOf: deniedRoots) {
+                        repos.insert(canonicalPath(main))
+                    }
                     foundNestedGit = true
                 case .brokenOrphan:
                     brokenOrphans.insert(canonicalPath(path2))
