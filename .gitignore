@@ -1,0 +1,20 @@
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+
+# Build artifacts
+dist/
+*.dmg
+*.zip
+*.app
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Xcode
+xcuserdata/
+DerivedData/
