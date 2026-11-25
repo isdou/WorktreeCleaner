@@ -74,10 +74,11 @@ open dist/WorktreeCleaner.app
 
 Worktree Cleaner also ships as a **native Antigravity MCP App plugin** powered by the exact same `WorktreeCleanerCore` Swift engine + an interactive single-file UI built with `@modelcontextprotocol/ext-apps`.
 
-It supports all three Antigravity surfaces:
-- **Inline in chat** when the agent calls `open_worktree_cleaner`
-- **Side Pane (`+` menu)** via `aux_pane` entrypoint
-- **Full-Page Sidebar** via `global` entrypoint
+It supports all three Antigravity surfaces plus model-safety isolation:
+- **Inline chat card** via `show_worktrees_inline` (multi-select checkboxes, disk reclaim summary, batch Trash confirmation)
+- **Side Pane (`+` menu)** via `open_worktree_cleaner` (`aux_pane` entrypoint)
+- **Full-Page Sidebar** via `open_worktree_cleaner` (`global` entrypoint)
+- **Safety Visibility Isolation**: Destructive tools (`remove_worktree`, `prune_missing_worktrees`, `slim_worktree_caches`, `push_worktree`, `copy_precious_files`) declare `_meta.ui.visibility: ["app"]` so the LLM cannot invoke them directly — only explicit UI confirmation triggers them, while **Attach to Chat** (`app.updateModelContext`) lets the agent inspect diffs first.
 
 ### One-Command Install into Antigravity
 

@@ -69,10 +69,11 @@ xattr -cr "/Applications/Worktree Cleaner.app"
 
 ## Antigravity MCP App 插件（SEP-1865）
 
-Worktree Cleaner 同时内置了 **Antigravity MCP App 插件**：底层复用同一套原生 Swift `WorktreeCleanerCore` 引擎（零逻辑重复），前端基于官方 `@modelcontextprotocol/ext-apps` 打包为单文件交互界面，支持：
-- **聊天内嵌渲染**：对话中调用 `open_worktree_cleaner` 直接弹出可视化面板
-- **右侧边栏（`aux_pane`）**：通过 `+` 菜单直接打开
-- **左侧栏全页应用（`global`）**：从 Antigravity 左侧栏一键进入完整工作台
+Worktree Cleaner 同时内置了 **Antigravity MCP App 插件**：底层复用同一套原生 Swift `WorktreeCleanerCore` 引擎（零逻辑重复），前端基于官方 `@modelcontextprotocol/ext-apps` 打包为单文件交互界面，支持全 3 种展示位与工具安全隔离：
+- **聊天流内联卡片**：调用 `show_worktrees_inline` 在对话下方直接渲染带勾选框、空间统计和「移入废纸篓」按钮的紧凑卡片
+- **右侧边栏（`aux_pane`）**：调用 `open_worktree_cleaner` 或通过 `+` 菜单直接打开
+- **左侧栏全页应用（`global`）**：从 Antigravity 左侧栏一键进入完整双栏工作台
+- **工具可见性安全隔离**：删除、清幽灵、清缓存、推送、拷回均标记 `_meta.ui.visibility: ["app"]` 对模型隐藏，仅 UI 确认可触发；支持通过 **附带到对话**（`app.updateModelContext`）把有改动 worktree 附进输入框让 Agent 先审查。
 
 ### 一键安装到 Antigravity
 
