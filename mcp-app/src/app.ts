@@ -81,17 +81,23 @@ interface ScanPayload {
   items: WorktreeItemDTO[];
   initialFilter?: string;
   initialSearch?: string;
+  displayMode?: "inline" | "workbench";
 }
 
 const state = {
   zh: navigator.language.toLowerCase().startsWith("zh"),
   loading: true,
   busy: false,
+  displayMode: "workbench" as "workbench" | "inline",
   payload: null as ScanPayload | null,
   filter: "all" as "all" | SafetyKey,
   search: "",
   selectedId: null as string | null,
+  inlineInspectId: null as string | null,
+  checkedIds: new Set<string>(),
+  attachedIds: new Set<string>(),
   canMessage: false,
+  canUpdateContext: false,
   canOpenLinks: false,
   toast: null as { message: string; isError: boolean } | null,
   modal: null as
@@ -113,10 +119,21 @@ const state = {
         deleteLocalBranch: boolean;
         force: boolean;
         error: string | null;
+      }
+    | {
+        type: "batch-remove";
+        items: WorktreeItemDTO[];
+        moveToTrash: boolean;
+        backupCommitFirst: boolean;
+        deleteLocalBranch: boolean;
+        error: string | null;
       },
 };
 
-const app = new App({ name: "Worktree Cleaner", version: "1.0.0" }, {});
+const app = new App(
+  { name: "Worktree Cleaner", version: "1.1.0" },
+  { availableDisplayModes: ["inline", "fullscreen"] }
+);
 
 function tr(zh: string, en: string): string {
   return state.zh ? zh : en;
@@ -154,6 +171,38 @@ function showToast(message: string, isError = false): void {
   }, 4200);
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let idx = 0;
+  while (value >= 1000 && idx < units.length - 1) {
+    value /= 1000;
+    idx++;
+  }
+  return `${value >= 100 || idx === 0 ? value.toFixed(0) : value.toFixed(value >= 10 ? 1 : 2)} ${units[idx]}`;
+}
+
+function rowHint(item: WorktreeItemDTO): string {
+  if (item.activeProcesses.length > 0) {
+    return tr(`运行中：${item.activeProcesses[0]}`, `Running: ${item.activeProcesses[0]}`);
+  }
+  if (item.featureSummary?.agentTasks[0]) {
+    return item.featureSummary.agentTasks[0];
+  }
+  return [
+    item.source,
+    item.pr ? `#${item.pr.number}` : "",
+    item.modifiedCount + item.untrackedCount > 0
+      ? tr(`${item.modifiedCount + item.untrackedCount} 改动`, `${item.modifiedCount + item.untrackedCount} dirty`)
+      : item.aheadCount > 0
+        ? tr(`${item.aheadCount} 未推`, `${item.aheadCount} unpushed`)
+        : item.preciousIgnoredFiles[0] ?? (item.isRecentlyActive ? tr("近期", "recent") : ""),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function applyScanPayload(raw: unknown): void {
   if (!raw || typeof raw !== "object") return;
   const data = raw as Partial<ScanPayload> & { scan?: ScanPayload };
@@ -162,6 +211,9 @@ function applyScanPayload(raw: unknown): void {
 
   state.payload = payload;
   state.loading = false;
+  if (payload.displayMode === "inline" || payload.displayMode === "workbench") {
+    state.displayMode = payload.displayMode;
+  }
   if (payload.initialFilter && ["all", "safe", "caution", "danger", "missing"].includes(payload.initialFilter)) {
     state.filter = payload.initialFilter as typeof state.filter;
   }
@@ -170,7 +222,14 @@ function applyScanPayload(raw: unknown): void {
   }
 
   const items = payload.items;
-  if (!state.selectedId || !items.some((i) => i.id === state.selectedId)) {
+  const validIds = new Set(items.map((i) => i.id));
+  for (const id of Array.from(state.checkedIds)) {
+    if (!validIds.has(id)) state.checkedIds.delete(id);
+  }
+  if (state.inlineInspectId && !validIds.has(state.inlineInspectId)) {
+    state.inlineInspectId = null;
+  }
+  if (!state.selectedId || !validIds.has(state.selectedId)) {
     state.selectedId = items[0]?.id ?? null;
   }
   render();
@@ -380,6 +439,119 @@ async function handleExecuteRemove(): Promise<void> {
   }
 }
 
+async function handleExecuteBatchRemove(): Promise<void> {
+  if (!state.modal || state.modal.type !== "batch-remove" || state.busy) return;
+  const m = state.modal;
+  state.busy = true;
+  m.error = null;
+  render();
+
+  let removedCount = 0;
+  const errors: string[] = [];
+  try {
+    for (let i = 0; i < m.items.length; i++) {
+      const item = m.items[i];
+      const res = await callTool("remove_worktree", {
+        path: item.path,
+        backupCommitFirst: m.backupCommitFirst,
+        moveToTrash: item.isMissing ? false : m.moveToTrash,
+        deleteLocalBranch: m.deleteLocalBranch && item.canDeleteLocalBranch,
+        force: false,
+        skipRescan: true,
+      });
+      if (res.isError) {
+        const msg = (res.structuredContent?.error as string) ?? res.content?.[0]?.text ?? "Remove failed";
+        errors.push(`${item.displayBranch}: ${msg}`);
+      } else {
+        removedCount++;
+        state.checkedIds.delete(item.id);
+      }
+    }
+
+    // 批量清理完毕统一刷新一次扫描结果
+    const scanRes = await callTool("scan_worktrees", { includeDiskSizes: true });
+    if (!scanRes.isError && scanRes.structuredContent) {
+      applyScanPayload(scanRes.structuredContent);
+    }
+
+    if (errors.length > 0) {
+      m.error = errors.join("\n");
+      if (removedCount > 0) {
+        showToast(tr(`已清理 ${removedCount} 项，${errors.length} 项失败`, `Removed ${removedCount}, ${errors.length} failed`), true);
+      }
+    } else {
+      state.modal = null;
+      showToast(
+        tr(
+          `已将 ${removedCount} 项 Worktree ${m.moveToTrash ? "移入废纸篓" : "移除"}`,
+          `Removed ${removedCount} worktree(s)`
+        )
+      );
+    }
+  } catch (err) {
+    m.error = String(err);
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+function buildContextMarkdown(items: WorktreeItemDTO[]): string {
+  const sections = items.map((item) => {
+    const lines: string[] = [
+      `### Worktree: ${item.mainRepoName} · ${item.displayBranch}`,
+      `- Path: \`${item.path}\``,
+      `- Safety: \`${item.safetyLevel}\` (${state.zh ? item.safetySummaryZh : item.safetySummaryEn})`,
+      `- Source: ${item.source} · Size: ${item.formattedSize}${item.reclaimableCacheBytes > 0 ? ` (cache: ${item.formattedCacheSize})` : ""}`,
+    ];
+    if (item.pr) {
+      lines.push(`- PR: #${item.pr.number} (${item.pr.state}) ${item.pr.url}`);
+    }
+    if (item.activeProcesses.length > 0) {
+      lines.push(`- Active processes: ${item.activeProcesses.join(", ")}`);
+    }
+    if (item.preciousIgnoredFiles.length > 0) {
+      lines.push(`- Precious ignored files: ${item.preciousIgnoredFiles.join(", ")}`);
+    }
+    if (item.featureSummary?.agentTasks.length) {
+      lines.push(`- Agent tasks: ${item.featureSummary.agentTasks.join(" | ")}`);
+    }
+    if (item.changedFiles.length > 0) {
+      const files = item.changedFiles.slice(0, 15).map((f) => `${f.code} ${f.path}`).join(", ");
+      lines.push(`- Uncommitted files (${item.modifiedCount + item.untrackedCount}): ${files}`);
+    }
+    if (item.unpushedCommits.length > 0) {
+      const commits = item.unpushedCommits.slice(0, 8).map((c) => `${c.hash} ${c.message}`).join("; ");
+      lines.push(`- Unpushed commits (${item.aheadCount}): ${commits}`);
+    }
+    return lines.join("\n");
+  });
+
+  return [
+    `[Worktree Cleaner Context — ${items.length} worktree(s) attached for review; destructive actions are UI-confirmed only]`,
+    ...sections,
+  ].join("\n\n");
+}
+
+async function handleAttachContext(items: WorktreeItemDTO[]): Promise<void> {
+  if (!state.canUpdateContext || items.length === 0) return;
+  try {
+    const markdown = buildContextMarkdown(items);
+    await app.updateModelContext({
+      content: [{ type: "text", text: markdown }],
+    });
+    state.attachedIds = new Set(items.map((i) => i.id));
+    render();
+    showToast(
+      items.length === 1
+        ? tr("已附带到聊天框上下文，可直接提问", "Attached to chat context")
+        : tr(`已将 ${items.length} 项附带到聊天框上下文`, `Attached ${items.length} items to chat context`)
+    );
+  } catch (err) {
+    showToast(String(err), true);
+  }
+}
+
 async function handleAskAgent(item: WorktreeItemDTO): Promise<void> {
   if (!state.canMessage) return;
   const prompt = state.zh
@@ -432,6 +604,12 @@ function render(): void {
     { key: "danger", label: tr("有改动", "Active"), count: summary?.dangerCount ?? 0, dot: "dot-danger" },
     { key: "missing", label: tr("幽灵", "Ghost"), count: summary?.missingCount ?? 0, dot: "dot-missing" },
   ];
+
+  if (state.displayMode === "inline") {
+    root.innerHTML = renderInlineShell(summary, visible, segWidths, filters);
+    bindEvents();
+    return;
+  }
 
   root.innerHTML = `
     <div class="app-shell">
@@ -521,21 +699,7 @@ function render(): void {
                           </div>
                           ${list
                             .map((item) => {
-                              const hint =
-                                item.activeProcesses.length > 0
-                                  ? tr(`运行中：${item.activeProcesses[0]}`, `Running: ${item.activeProcesses[0]}`)
-                                  : item.featureSummary?.agentTasks[0] ??
-                                    [
-                                      item.source,
-                                      item.pr ? `#${item.pr.number}` : "",
-                                      item.modifiedCount + item.untrackedCount > 0
-                                        ? tr(`${item.modifiedCount + item.untrackedCount} 改动`, `${item.modifiedCount + item.untrackedCount} dirty`)
-                                        : item.aheadCount > 0
-                                          ? tr(`${item.aheadCount} 未推`, `${item.aheadCount} unpushed`)
-                                          : item.preciousIgnoredFiles[0] ?? (item.isRecentlyActive ? tr("近期", "recent") : ""),
-                                    ]
-                                      .filter(Boolean)
-                                      .join(" · ");
+                              const hint = rowHint(item);
                               return `
                               <button class="wt-row ${current?.id === item.id ? "selected" : ""}" data-select="${esc(item.id)}">
                                 <span class="dot dot-${item.safetyLevel}" style="margin-top:5px"></span>
@@ -567,6 +731,172 @@ function render(): void {
   `;
 
   bindEvents();
+}
+
+function renderInlineShell(
+  summary: ScanPayload["summary"] | undefined,
+  visible: WorktreeItemDTO[],
+  segWidths: { safe: number; caution: number; danger: number; missing: number },
+  filters: { key: "all" | SafetyKey; label: string; count: number; dot?: string }[]
+): string {
+  const allItems = state.payload?.items ?? [];
+  const inspected = state.inlineInspectId
+    ? allItems.find((i) => i.id === state.inlineInspectId) ?? null
+    : null;
+  const checkedItems = allItems.filter((i) => state.checkedIds.has(i.id));
+  const checkedBytes = checkedItems.reduce((acc, i) => acc + i.diskSizeBytes, 0);
+  const safeSelectableCount = visible.filter((i) => i.safetyLevel === "safe" || i.safetyLevel === "missing").length;
+  const hasDangerChecked = checkedItems.some((i) => i.safetyLevel === "danger");
+
+  return `
+    <div class="app-shell mode-inline">
+      <header class="topbar">
+        <div class="topbar-left">
+          <span class="brand-mark">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4.6 3.5V12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M4.6 10.6C4.6 7.4 11.4 8.8 11.4 5.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="4.6" cy="3.1" r="1.8" fill="currentColor"/>
+              <circle cx="4.6" cy="12.9" r="1.8" fill="currentColor"/>
+              <circle cx="11.4" cy="4.9" r="1.8" fill="currentColor"/>
+            </svg>
+            Worktree Cleaner
+          </span>
+          ${
+            summary
+              ? `<span class="reclaim-figure num">${esc(summary.formattedReclaimable)}</span>
+                 <span class="reclaim-sub num">${tr(`${summary.safeCount + summary.missingCount} 可清 · 共 ${summary.totalCount} 项`, `${summary.safeCount + summary.missingCount} safe · ${summary.totalCount} total`)}</span>`
+              : `<span class="reclaim-sub">${tr("正在扫描…", "Scanning…")}</span>`
+          }
+        </div>
+        <div class="topbar-actions">
+          ${
+            !inspected && safeSelectableCount > 0
+              ? `<button class="btn btn-xs" id="btn-select-safe" ${state.busy ? "disabled" : ""}>${tr("全选安全项", "Select Safe")}</button>`
+              : ""
+          }
+          ${
+            (summary?.missingCount ?? 0) > 0
+              ? `<button class="btn btn-xs" id="btn-prune" ${state.busy ? "disabled" : ""}>${tr(`清幽灵 (${summary!.missingCount})`, `Prune (${summary!.missingCount})`)}</button>`
+              : ""
+          }
+          <button class="btn btn-ghost btn-xs" id="btn-lang">${state.zh ? "EN" : "中"}</button>
+          <button class="btn btn-icon btn-xs" id="btn-refresh" title="${tr("重新扫描", "Rescan")}" ${state.busy ? "disabled" : ""}>↻</button>
+        </div>
+      </header>
+
+      ${
+        inspected
+          ? `
+        <div class="inline-back-bar">
+          <button class="btn btn-ghost btn-xs" id="btn-inline-back">← ${tr("返回列表", "Back to List")}</button>
+          <span class="muted num">${esc(inspected.mainRepoName)} · ${esc(inspected.formattedSize)}</span>
+        </div>
+        <div class="inline-detail-wrap">
+          ${renderDetail(inspected)}
+        </div>
+      `
+          : `
+        <div class="inline-controls">
+          ${
+            summary && summary.totalCount > 0
+              ? `<div class="seg-bar">
+                  ${segWidths.safe > 0 ? `<div style="width:${segWidths.safe}%;background:var(--dot-safe)"></div>` : ""}
+                  ${segWidths.caution > 0 ? `<div style="width:${segWidths.caution}%;background:var(--dot-caution)"></div>` : ""}
+                  ${segWidths.danger > 0 ? `<div style="width:${segWidths.danger}%;background:var(--dot-danger)"></div>` : ""}
+                  ${segWidths.missing > 0 ? `<div style="width:${segWidths.missing}%;background:var(--dot-missing)"></div>` : ""}
+                </div>`
+              : ""
+          }
+          <div class="filter-row">
+            ${filters
+              .map(
+                (f) => `
+              <button class="filter-pill ${state.filter === f.key ? "active" : ""}" data-filter="${f.key}">
+                ${f.dot ? `<span class="dot ${f.dot}"></span>` : ""}
+                <span>${esc(f.label)}</span>
+                ${f.count > 0 ? `<span class="muted num">${f.count}</span>` : ""}
+              </button>`
+              )
+              .join("")}
+          </div>
+        </div>
+
+        <div class="inline-list">
+          ${
+            state.loading
+              ? `<div class="empty-state">${tr("正在扫描本机 Worktree…", "Scanning local worktrees…")}</div>`
+              : visible.length === 0
+                ? `<div class="empty-state">${
+                    allItems.length === 0
+                      ? tr("没有冗余 Worktree", "No redundant worktrees")
+                      : tr("无匹配结果", "No matching worktrees")
+                  }</div>`
+                : visible
+                    .map((item) => {
+                      const checked = state.checkedIds.has(item.id);
+                      const attached = state.attachedIds.has(item.id);
+                      const hint = rowHint(item);
+                      return `
+                      <div class="inline-row ${checked ? "is-checked" : ""}">
+                        <input
+                          class="inline-check"
+                          type="checkbox"
+                          data-check="${esc(item.id)}"
+                          ${checked ? "checked" : ""}
+                          aria-label="${esc(item.displayBranch)}"
+                        />
+                        <span class="dot dot-${item.safetyLevel}"></span>
+                        <div class="inline-row-main" data-inspect="${esc(item.id)}">
+                          <div class="inline-row-title">
+                            <span class="inline-repo">${esc(item.isOrphan ? tr("孤儿", "Orphan") : item.mainRepoName)}</span>
+                            <span class="wt-branch">${esc(item.displayBranch)}</span>
+                          </div>
+                          <div class="wt-sub">${esc(hint)}</div>
+                        </div>
+                        <span class="wt-size num">${esc(item.formattedSize)}</span>
+                        <div class="inline-row-actions">
+                          ${
+                            state.canUpdateContext
+                              ? `<button class="btn btn-ghost btn-xs ${attached ? "btn-attached" : ""}" data-attach-one="${esc(item.id)}" title="${tr("附带到聊天框上下文", "Attach to chat context")}">${attached ? tr("已附带", "Attached") : tr("附带", "Attach")}</button>`
+                              : ""
+                          }
+                          <button class="btn btn-ghost btn-xs" data-inspect="${esc(item.id)}">${tr("详情", "Inspect")}</button>
+                        </div>
+                      </div>`;
+                    })
+                    .join("")
+          }
+        </div>
+
+        ${
+          checkedItems.length > 0
+            ? `
+          <div class="inline-footer">
+            <div class="action-group">
+              <span class="reclaim-figure num">${tr(`已选 ${checkedItems.length} 项 · ${formatBytes(checkedBytes)}`, `${checkedItems.length} selected · ${formatBytes(checkedBytes)}`)}</span>
+              <button class="btn btn-ghost btn-xs" id="btn-clear-checks">${tr("取消", "Clear")}</button>
+            </div>
+            <div class="action-group">
+              ${
+                state.canUpdateContext
+                  ? `<button class="btn btn-xs" id="btn-attach-checked">${tr("附带到对话", "Attach to Chat")}</button>`
+                  : ""
+              }
+              <button class="btn btn-xs ${hasDangerChecked ? "btn-danger" : "btn-primary"}" id="btn-batch-remove" ${state.busy ? "disabled" : ""}>
+                ${tr(`移入废纸篓 (${checkedItems.length})`, `Move to Trash (${checkedItems.length})`)}
+              </button>
+            </div>
+          </div>`
+            : ""
+        }
+      `
+      }
+
+      ${state.toast ? `<div class="toast"><span class="dot ${state.toast.isError ? "dot-danger" : "dot-safe"}"></span><span>${esc(state.toast.message)}</span></div>` : ""}
+      ${renderModal()}
+    </div>
+  `;
 }
 
 function renderDetail(item: WorktreeItemDTO): string {
@@ -714,6 +1044,11 @@ function renderDetail(item: WorktreeItemDTO): string {
     <div class="action-bar">
       <div class="action-group">
         ${item.directoryExists ? `<button class="btn" id="btn-finder">Finder</button>` : ""}
+        ${
+          state.canUpdateContext
+            ? `<button class="btn ${state.attachedIds.has(item.id) ? "btn-attached" : ""}" id="btn-attach-context">${state.attachedIds.has(item.id) ? tr("已附带到对话", "Attached") : tr("附带到对话", "Attach to Chat")}</button>`
+            : ""
+        }
         ${state.canMessage ? `<button class="btn" id="btn-ask-agent">${tr("让 Agent 审查", "Ask Agent")}</button>` : ""}
       </div>
       <div class="action-group">
@@ -784,6 +1119,66 @@ function renderModal(): string {
           <div class="modal-foot">
             <button class="btn" id="modal-close-btn" ${state.busy ? "disabled" : ""}>${tr("取消", "Cancel")}</button>
             <button class="btn btn-primary" id="btn-confirm-push" ${state.busy ? "disabled" : ""}>${state.busy ? tr("推送中…", "Pushing…") : tr("立即推送", "Push")}</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  if (m.type === "batch-remove") {
+    const totalBytes = m.items.reduce((acc, i) => acc + i.diskSizeBytes, 0);
+    const hasDirty = m.items.some((i) => i.isDirty);
+    const hasDeletableBranch = m.items.some((i) => i.canDeleteLocalBranch);
+    const hasDanger = m.items.some((i) => i.safetyLevel === "danger");
+    return `
+      <div class="modal-backdrop" id="modal-backdrop">
+        <div class="modal">
+          <div class="modal-head">
+            <span>${tr(`确认清理 ${m.items.length} 项 Worktree`, `Remove ${m.items.length} Worktrees`)}</span>
+            <button class="btn btn-icon" id="modal-close">✕</button>
+          </div>
+          <div class="modal-body">
+            <div style="font-size:12.5px;font-weight:500">${tr(`共释放约 ${formatBytes(totalBytes)}`, `Reclaims ~${formatBytes(totalBytes)}`)}</div>
+            <div class="card">
+              ${m.items
+                .slice(0, 8)
+                .map(
+                  (it) =>
+                    `<div class="list-item"><span class="dot dot-${it.safetyLevel}"></span><span class="ellipsis">${esc(it.mainRepoName)} · ${esc(it.displayBranch)}</span><span class="muted num">${esc(it.formattedSize)}</span></div>`
+                )
+                .join("")}
+              ${
+                m.items.length > 8
+                  ? `<div class="list-item"><span class="muted">${tr(`其余 ${m.items.length - 8} 项…`, `and ${m.items.length - 8} more…`)}</span></div>`
+                  : ""
+              }
+            </div>
+            <label class="check-row">
+              <input id="brm-trash" type="checkbox" ${m.moveToTrash ? "checked" : ""} />
+              <span>${tr("移入 macOS 废纸篓（可随时还原）", "Move to macOS Trash (recoverable)")}</span>
+            </label>
+            ${
+              hasDirty
+                ? `<label class="check-row">
+                    <input id="brm-backup" type="checkbox" ${m.backupCommitFirst ? "checked" : ""} />
+                    <span>${tr("对未提交改动先自动 Commit 备份", "Auto-commit uncommitted changes before removal")}</span>
+                  </label>`
+                : ""
+            }
+            ${
+              hasDeletableBranch
+                ? `<label class="check-row">
+                    <input id="brm-branch" type="checkbox" ${m.deleteLocalBranch ? "checked" : ""} />
+                    <span>${tr("同时删除对应的本地分支", "Also delete matching local branches")}</span>
+                  </label>`
+                : ""
+            }
+            ${m.error ? `<div class="error-box">${esc(m.error)}</div>` : ""}
+          </div>
+          <div class="modal-foot">
+            <button class="btn" id="modal-close-btn" ${state.busy ? "disabled" : ""}>${tr("取消", "Cancel")}</button>
+            <button class="btn ${hasDanger ? "btn-danger" : "btn-primary"}" id="btn-confirm-batch-remove" ${state.busy ? "disabled" : ""}>
+              ${state.busy ? tr("处理中…", "Removing…") : m.moveToTrash ? tr(`移入废纸篓 (${m.items.length})`, `Move to Trash (${m.items.length})`) : tr(`确认移除 (${m.items.length})`, `Remove (${m.items.length})`)}
+            </button>
           </div>
         </div>
       </div>`;
@@ -879,11 +1274,82 @@ function bindEvents(): void {
     };
   });
 
-  const item = selectedItem();
+  // 内联卡片复选框、详情切换与单条/批量附带上下文
+  document.querySelectorAll<HTMLInputElement>("[data-check]").forEach((box) => {
+    box.onchange = () => {
+      const id = box.dataset.check;
+      if (!id) return;
+      if (box.checked) state.checkedIds.add(id);
+      else state.checkedIds.delete(id);
+      render();
+    };
+  });
+
+  document.querySelectorAll<HTMLElement>("[data-inspect]").forEach((el) => {
+    el.onclick = () => {
+      const id = el.dataset.inspect;
+      if (!id) return;
+      state.inlineInspectId = id;
+      state.selectedId = id;
+      render();
+    };
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-attach-one]").forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.dataset.attachOne;
+      const target = state.payload?.items.find((i) => i.id === id);
+      if (target) void handleAttachContext([target]);
+    };
+  });
+
+  document.getElementById("btn-inline-back")?.addEventListener("click", () => {
+    state.inlineInspectId = null;
+    render();
+  });
+
+  document.getElementById("btn-select-safe")?.addEventListener("click", () => {
+    for (const it of filteredItems()) {
+      if (it.safetyLevel === "safe" || it.safetyLevel === "missing") {
+        state.checkedIds.add(it.id);
+      }
+    }
+    render();
+  });
+
+  document.getElementById("btn-clear-checks")?.addEventListener("click", () => {
+    state.checkedIds.clear();
+    render();
+  });
+
+  document.getElementById("btn-attach-checked")?.addEventListener("click", () => {
+    const items = (state.payload?.items ?? []).filter((i) => state.checkedIds.has(i.id));
+    void handleAttachContext(items);
+  });
+
+  document.getElementById("btn-batch-remove")?.addEventListener("click", () => {
+    const items = (state.payload?.items ?? []).filter((i) => state.checkedIds.has(i.id));
+    if (items.length === 0) return;
+    state.modal = {
+      type: "batch-remove",
+      items,
+      moveToTrash: true,
+      backupCommitFirst: true,
+      deleteLocalBranch: false,
+      error: null,
+    };
+    render();
+  });
+
+  const item =
+    state.displayMode === "inline" && state.inlineInspectId
+      ? state.payload?.items.find((i) => i.id === state.inlineInspectId) ?? null
+      : selectedItem();
   if (item) {
     document.getElementById("btn-finder")?.addEventListener("click", () => {
       void callTool("open_in_finder", { path: item.path });
     });
+    document.getElementById("btn-attach-context")?.addEventListener("click", () => void handleAttachContext([item]));
     document.getElementById("btn-ask-agent")?.addEventListener("click", () => void handleAskAgent(item));
     document.getElementById("btn-slim")?.addEventListener("click", () => void handleSlimCaches(item));
     document.getElementById("btn-copy-precious")?.addEventListener("click", () => void handleCopyPrecious(item));
@@ -954,6 +1420,16 @@ function bindEvents(): void {
     if (forceEl) forceEl.onchange = () => { m.force = forceEl.checked; };
     document.getElementById("btn-confirm-remove")?.addEventListener("click", () => void handleExecuteRemove());
   }
+  if (state.modal?.type === "batch-remove") {
+    const m = state.modal;
+    const trashEl = document.getElementById("brm-trash") as HTMLInputElement | null;
+    const backupEl = document.getElementById("brm-backup") as HTMLInputElement | null;
+    const branchEl = document.getElementById("brm-branch") as HTMLInputElement | null;
+    if (trashEl) trashEl.onchange = () => { m.moveToTrash = trashEl.checked; render(); };
+    if (backupEl) backupEl.onchange = () => { m.backupCommitFirst = backupEl.checked; };
+    if (branchEl) branchEl.onchange = () => { m.deleteLocalBranch = branchEl.checked; };
+    document.getElementById("btn-confirm-batch-remove")?.addEventListener("click", () => void handleExecuteBatchRemove());
+  }
 }
 
 function applyHostContext(ctx: ReturnType<App["getHostContext"]>): void {
@@ -967,6 +1443,9 @@ function applyHostContext(ctx: ReturnType<App["getHostContext"]>): void {
   }
   if (ctx.locale) {
     state.zh = ctx.locale.toLowerCase().startsWith("zh");
+  }
+  if (ctx.displayMode === "inline" && !state.payload?.displayMode) {
+    state.displayMode = "inline";
   }
 }
 
@@ -999,6 +1478,7 @@ void (async () => {
     await app.connect();
     const caps = app.getHostCapabilities();
     state.canMessage = Boolean(caps?.message);
+    state.canUpdateContext = Boolean(caps?.updateModelContext);
     state.canOpenLinks = Boolean(caps?.openLinks);
     applyHostContext(app.getHostContext());
     render();

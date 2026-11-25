@@ -152,6 +152,13 @@ public actor MCPServerHandler {
             ]
         ]
 
+        // 仅声明 _meta.ui.resourceUri（无 aux_pane/global），在聊天流中直接渲染内联交互卡片
+        let inlineCardMeta: [String: Any] = [
+            "ui": ["resourceUri": appURI],
+            "ui/resourceUri": appURI
+        ]
+
+        // 安全隔离：所有破坏性/变更类工具仅对 UI 沙箱可见，对 LLM 完全隐藏，杜绝误删风险
         let appOnlyMeta: [String: Any] = [
             "ui": ["visibility": ["app"]]
         ]
@@ -160,7 +167,7 @@ public actor MCPServerHandler {
             [
                 "name": "open_worktree_cleaner",
                 "title": "Worktree Cleaner",
-                "description": "Open the interactive Worktree Cleaner UI workbench inside Antigravity to visually inspect Git worktrees (Codex/Claude tasks, diff, squash/PR merge status, active process locks, precious .env files), slim caches, push branches, or safely move stale worktrees to Trash. All parameters are optional.",
+                "description": "Open the full interactive Worktree Cleaner workbench in the Antigravity side pane or global plugin view to visually inspect Git worktrees (Codex/Claude tasks, diff, squash/PR merge status, active process locks, precious .env files), attach dirty worktrees to chat, slim caches, push branches, or safely move stale worktrees to Trash. All parameters are optional.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -188,9 +195,39 @@ public actor MCPServerHandler {
                 "_meta": workbenchMeta
             ],
             [
+                "name": "show_worktrees_inline",
+                "title": "Show Worktrees Inline Card",
+                "description": "Render a compact interactive Worktree Cleaner card directly inline in the chat stream with checkboxes, disk usage breakdown, safety filters, attach-to-chat context pills, and Trash cleanup confirmation. Prefer this for quick in-chat checks (e.g. 'which worktrees can I delete?'); use open_worktree_cleaner for the full side-pane workbench.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "filter": [
+                            "type": "string",
+                            "enum": ["all", "safe", "caution", "danger", "missing"],
+                            "description": "Optional initial safety filter."
+                        ],
+                        "search": [
+                            "type": "string",
+                            "description": "Optional initial search query (repo, branch, or task keyword)."
+                        ],
+                        "roots": [
+                            "type": "array",
+                            "items": ["type": "string"],
+                            "description": "Optional extra or override directories to scan."
+                        ],
+                        "freshnessHours": [
+                            "type": "integer",
+                            "description": "Freshness cooldown hours (default 24)."
+                        ]
+                    ],
+                    "additionalProperties": false
+                ],
+                "_meta": inlineCardMeta
+            ],
+            [
                 "name": "scan_worktrees",
                 "title": "Scan Git Worktrees",
-                "description": "Scan local Git repositories and AI agent worktree directories (~/.codex/worktrees, ~/.claude/worktrees, etc.) and return full structured safety & disk-size diagnostics.",
+                "description": "Read-only scan of local Git repositories and AI agent worktree directories (~/.codex/worktrees, ~/.claude/worktrees, etc.) returning full structured safety, merge/PR, and disk-size diagnostics.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -214,7 +251,7 @@ public actor MCPServerHandler {
             [
                 "name": "get_worktree_diff",
                 "title": "Get Worktree Diff",
-                "description": "Return staged and unstaged git diff for a specific worktree path.",
+                "description": "Read-only inspection returning staged and unstaged git diff for a specific worktree path.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -227,7 +264,7 @@ public actor MCPServerHandler {
             [
                 "name": "slim_worktree_caches",
                 "title": "Slim Worktree Build Caches",
-                "description": "Move regenerable build/dependency caches (node_modules, .next, .build, target, DerivedData, .venv, etc.) inside a worktree to macOS Trash while keeping all source code and uncommitted edits intact.",
+                "description": "App-only action: move regenerable build/dependency caches (node_modules, .next, .build, target, DerivedData, .venv, etc.) inside a worktree to macOS Trash while keeping all source code and uncommitted edits intact.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -235,12 +272,13 @@ public actor MCPServerHandler {
                     ],
                     "required": ["path"],
                     "additionalProperties": false
-                ]
+                ],
+                "_meta": appOnlyMeta
             ],
             [
                 "name": "copy_precious_files",
                 "title": "Copy Precious Ignored Files to Main Repo",
-                "description": "Safely copy precious ignored local files (.env, .env.local, secrets.json, *.sqlite, etc.) from a worktree back to its main repository without overwriting existing files.",
+                "description": "App-only action: safely copy precious ignored local files (.env, .env.local, secrets.json, *.sqlite, etc.) from a worktree back to its main repository without overwriting existing files.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -248,12 +286,13 @@ public actor MCPServerHandler {
                     ],
                     "required": ["path"],
                     "additionalProperties": false
-                ]
+                ],
+                "_meta": appOnlyMeta
             ],
             [
                 "name": "push_worktree",
                 "title": "Commit and Push Worktree",
-                "description": "Push a worktree branch to its Git remote (optionally staging & committing dirty changes, creating a branch from Detached HEAD, and moving the worktree to Trash afterwards).",
+                "description": "App-only action: push a worktree branch to its Git remote (optionally staging & committing dirty changes, creating a branch from Detached HEAD, and moving the worktree to Trash afterwards).",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -265,12 +304,13 @@ public actor MCPServerHandler {
                     ],
                     "required": ["path"],
                     "additionalProperties": false
-                ]
+                ],
+                "_meta": appOnlyMeta
             ],
             [
                 "name": "remove_worktree",
                 "title": "Safely Remove Worktree",
-                "description": "Remove a Git worktree or orphaned directory (moves to macOS Trash + git worktree prune by default, with optional auto-commit backup and optional synced local branch deletion).",
+                "description": "App-only action: remove a Git worktree or orphaned directory (moves to macOS Trash + git worktree prune by default, with optional auto-commit backup and optional synced local branch deletion).",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -278,21 +318,24 @@ public actor MCPServerHandler {
                         "backupCommitFirst": ["type": "boolean", "description": "Auto-commit uncommitted changes into the branch before removal (default true)."],
                         "moveToTrash": ["type": "boolean", "description": "Move directory to macOS Trash instead of permanent rm (default true)."],
                         "deleteLocalBranch": ["type": "boolean", "description": "Also delete matching local branch (protected branches are never deleted; default false)."],
-                        "force": ["type": "boolean", "description": "Force removal even if active processes or locks are detected (default false)."]
+                        "force": ["type": "boolean", "description": "Force removal even if active processes or locks are detected (default false)."],
+                        "skipRescan": ["type": "boolean", "description": "Skip immediate full rescan after removal (used during batch UI deletion; default false)."]
                     ],
                     "required": ["path"],
                     "additionalProperties": false
-                ]
+                ],
+                "_meta": appOnlyMeta
             ],
             [
                 "name": "prune_missing_worktrees",
                 "title": "Prune Ghost Worktree Metadata",
-                "description": "Run git worktree prune on all repositories that have missing/stale worktree metadata entries.",
+                "description": "App-only action: run git worktree prune on all repositories that have missing/stale worktree metadata entries.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [:],
                     "additionalProperties": false
-                ]
+                ],
+                "_meta": appOnlyMeta
             ],
             [
                 "name": "open_in_finder",
@@ -315,7 +358,8 @@ public actor MCPServerHandler {
 
     private func executeTool(name: String, arguments: [String: Any]) async -> [String: Any] {
         switch name {
-        case "open_worktree_cleaner":
+        case "open_worktree_cleaner", "show_worktrees_inline":
+            let isInline = (name == "show_worktrees_inline")
             let roots = (arguments["roots"] as? [String]).flatMap { $0.isEmpty ? nil : $0 } ?? lastSearchRoots
             let freshness = (arguments["freshnessHours"] as? Int) ?? 24
             let initialFilter = (arguments["filter"] as? String) ?? "all"
@@ -326,9 +370,10 @@ public actor MCPServerHandler {
                 items: items,
                 freshnessHours: freshness,
                 initialFilter: initialFilter,
-                initialSearch: initialSearch
+                initialSearch: initialSearch,
+                displayMode: isInline ? "inline" : "workbench"
             )
-            let textSummary = buildTextSummary(items: items, isWorkbench: true)
+            let textSummary = buildTextSummary(items: items, surface: isInline ? .inlineCard : .workbench)
             return [
                 "content": [["type": "text", "text": textSummary]],
                 "structuredContent": payload,
@@ -342,7 +387,7 @@ public actor MCPServerHandler {
 
             let items = await performFullScan(roots: roots, includeDiskSizes: includeSizes)
             let payload = buildScanPayload(items: items, freshnessHours: freshness)
-            let textSummary = buildTextSummary(items: items, isWorkbench: false)
+            let textSummary = buildTextSummary(items: items, surface: .headless)
             return [
                 "content": [["type": "text", "text": textSummary]],
                 "structuredContent": payload,
@@ -464,6 +509,7 @@ public actor MCPServerHandler {
             let moveToTrash = (arguments["moveToTrash"] as? Bool) ?? true
             let deleteBranch = (arguments["deleteLocalBranch"] as? Bool) ?? false
             let force = (arguments["force"] as? Bool) ?? false
+            let skipRescan = (arguments["skipRescan"] as? Bool) ?? false
 
             if !item.activeProcesses.isEmpty && !force {
                 let procs = item.activeProcesses.joined(separator: ", ")
@@ -479,17 +525,20 @@ public actor MCPServerHandler {
             )
             switch res {
             case .success:
-                let refreshed = await performFullScan(roots: lastSearchRoots, includeDiskSizes: true)
                 let actionDesc = moveToTrash ? "Moved to Trash and pruned" : "Removed"
                 let msg = "\(actionDesc): \(item.mainRepoName) · \(item.displayBranch(language: .en))"
+                var sc: [String: Any] = [
+                    "removedPath": item.path,
+                    "movedToTrash": moveToTrash,
+                    "message": msg
+                ]
+                if !skipRescan {
+                    let refreshed = await performFullScan(roots: lastSearchRoots, includeDiskSizes: true)
+                    sc["scan"] = buildScanPayload(items: refreshed, freshnessHours: 24)
+                }
                 return [
                     "content": [["type": "text", "text": msg]],
-                    "structuredContent": [
-                        "removedPath": item.path,
-                        "movedToTrash": moveToTrash,
-                        "message": msg,
-                        "scan": buildScanPayload(items: refreshed, freshnessHours: 24)
-                    ],
+                    "structuredContent": sc,
                     "isError": false
                 ]
             case .failure(let err):
@@ -576,11 +625,18 @@ public actor MCPServerHandler {
         return scanned.first(where: { $0.id == norm })
     }
 
+    private enum SummarySurface {
+        case workbench
+        case inlineCard
+        case headless
+    }
+
     private func buildScanPayload(
         items: [WorktreeItem],
         freshnessHours: Int,
         initialFilter: String? = nil,
-        initialSearch: String? = nil
+        initialSearch: String? = nil,
+        displayMode: String? = nil
     ) -> [String: Any] {
         let safeItems = items.filter { $0.safetyLevel == .safe || $0.safetyLevel == .missing }
         let reclaimableBytes = safeItems.compactMap(\.diskSizeBytes).reduce(0, +)
@@ -681,10 +737,11 @@ public actor MCPServerHandler {
         ]
         if let initialFilter { payload["initialFilter"] = initialFilter }
         if let initialSearch { payload["initialSearch"] = initialSearch }
+        if let displayMode { payload["displayMode"] = displayMode }
         return payload
     }
 
-    private func buildTextSummary(items: [WorktreeItem], isWorkbench: Bool) -> String {
+    private func buildTextSummary(items: [WorktreeItem], surface: SummarySurface) -> String {
         let safeCnt = items.filter { $0.safetyLevel == .safe }.count
         let cautionCnt = items.filter { $0.safetyLevel == .caution }.count
         let dangerCnt = items.filter { $0.safetyLevel == .danger }.count
@@ -695,8 +752,13 @@ public actor MCPServerHandler {
             .reduce(0, +)
         let reclaimableStr = ByteCountFormatter.string(fromByteCount: reclaimable, countStyle: .file)
 
-        if isWorkbench {
-            return "Opened Worktree Cleaner workbench (\(items.count) worktrees found: \(safeCnt) safe, \(cautionCnt) review, \(dangerCnt) active/dirty, \(missingCnt) ghost; ~\(reclaimableStr) safely reclaimable)."
+        switch surface {
+        case .workbench:
+            return "Opened Worktree Cleaner workbench (\(items.count) worktrees found: \(safeCnt) safe, \(cautionCnt) review, \(dangerCnt) active/dirty, \(missingCnt) ghost; ~\(reclaimableStr) safely reclaimable). Destructive actions are UI-confirmed only."
+        case .inlineCard:
+            return "Rendered interactive Worktree Cleaner card inline (\(items.count) worktrees: \(safeCnt) safe, \(cautionCnt) review, \(dangerCnt) active/dirty, \(missingCnt) ghost; ~\(reclaimableStr) safely reclaimable). Confirm selections directly in the card."
+        case .headless:
+            break
         }
 
         var lines = [

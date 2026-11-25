@@ -7,8 +7,12 @@ description: Visually inspect, push, slim build caches, or safely remove Git wor
 
 Use the `worktree-cleaner_worktree-cleaner` MCP server whenever the user asks to inspect, clean up, slim caches, push, or audit Git worktrees on macOS.
 
-## Default Workflow
+## Surface Selection
 
-1. **Prefer the interactive workbench**: Call `open_worktree_cleaner` (all parameters optional; pass `filter` or `search` if the user narrowed the scope) so the user can visually inspect safety levels, Codex/Claude task context, uncommitted diffs, and confirm deletions directly inside Antigravity.
-2. **Headless automation**: When the user asks for a quick report or targeted action without opening the workbench, call `scan_worktrees`, `get_worktree_diff`, `slim_worktree_caches`, `copy_precious_files`, `push_worktree`, `remove_worktree`, or `prune_missing_worktrees`.
-3. **Safety first**: Never pass `force: true` to `remove_worktree` unless the user explicitly confirms stopping or overriding active processes. Always keep `moveToTrash: true` and `backupCommitFirst: true` by default.
+1. **Quick in-chat check (Inline Card)**: Call `show_worktrees_inline` when the user asks a conversational question like "看看哪些 worktree 可以删" or "检查当前仓库的 worktree". It renders a compact interactive card directly inside the chat stream with checkboxes, disk totals, and one-click Trash cleanup or context attachment.
+2. **Full Workbench (Side Pane / Global Page)**: Call `open_worktree_cleaner` when the user wants to browse all repositories in detail, compare diffs, push branches, or keep a persistent side-pane inspector open while coding.
+3. **Read-Only Analysis**: Use `scan_worktrees` and `get_worktree_diff` when you need structured diagnostics or raw diffs to review uncommitted changes before advising the user.
+
+## Safety Isolation Model
+
+All destructive and mutation tools (`remove_worktree`, `prune_missing_worktrees`, `slim_worktree_caches`, `push_worktree`, `copy_precious_files`, `open_in_finder`) are intentionally restricted to `_meta.ui.visibility: ["app"]` so the model can never accidentally delete or modify worktrees. Always present findings clearly and let the user confirm any cleanup, cache slimming, or push action directly inside the Worktree Cleaner card or workbench.

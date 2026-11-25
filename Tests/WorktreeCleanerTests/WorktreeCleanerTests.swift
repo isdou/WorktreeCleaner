@@ -183,9 +183,33 @@ struct WorktreeCleanerTests {
         let entrypoints = try #require(agyMeta["entrypoints"] as? [[String: Any]])
         #expect(entrypoints.count == 2)
 
-        let finderTool = try #require(tools.first { ($0["name"] as? String) == "open_in_finder" })
-        let finderUI = try #require((finderTool["_meta"] as? [String: Any])?["ui"] as? [String: Any])
-        #expect((finderUI["visibility"] as? [String]) == ["app"])
+        // 聊天流内联卡片工具：仅声明 resourceUri，不声明 aux_pane/global entrypoints
+        let inlineTool = try #require(tools.first { ($0["name"] as? String) == "show_worktrees_inline" })
+        let inlineMeta = try #require(inlineTool["_meta"] as? [String: Any])
+        let inlineUI = try #require(inlineMeta["ui"] as? [String: Any])
+        #expect((inlineUI["resourceUri"] as? String) == MCPServerHandler.appURI)
+        #expect(inlineMeta["com.google.antigravity/ui"] == nil)
+
+        // 只读工具对模型可见
+        for readOnlyName in ["scan_worktrees", "get_worktree_diff"] {
+            let tool = try #require(tools.first { ($0["name"] as? String) == readOnlyName })
+            #expect(tool["_meta"] == nil)
+        }
+
+        // 安全隔离：所有破坏性/变更工具必须标记 visibility: ["app"]，对 LLM 完全隐藏
+        for appOnlyName in [
+            "remove_worktree",
+            "prune_missing_worktrees",
+            "slim_worktree_caches",
+            "push_worktree",
+            "copy_precious_files",
+            "open_in_finder"
+        ] {
+            let tool = try #require(tools.first { ($0["name"] as? String) == appOnlyName })
+            let meta = try #require(tool["_meta"] as? [String: Any])
+            let ui = try #require(meta["ui"] as? [String: Any])
+            #expect((ui["visibility"] as? [String]) == ["app"])
+        }
 
         // 3. resources/read
         let readReply = try #require(await handler.handleJSONLine(#"{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"ui://worktree-cleaner/app.html"}}"#))
