@@ -1,10 +1,11 @@
 name: Release macOS App
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.0)"
+        required: true
 
 permissions:
   contents: write
@@ -15,16 +16,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Check Swift version
-        run: swift --version
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Run unit tests
         run: swift test
 
       - name: Build Universal .app, .dmg, and .zip
         env:
-          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '1.0.0' }}
+          VERSION: ${{ inputs.tag }}
           CODESIGN_IDENTITY: "-"
         run: |
           CLEAN_VERSION="${VERSION#v}"
@@ -32,10 +32,11 @@ jobs:
           VERSION="$CLEAN_VERSION" ./scripts/build_app.sh --universal --dmg --zip
 
       - name: Upload GitHub Release assets
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag }}
           generate_release_notes: true
+          overwrite_files: false
           files: |
             dist/WorktreeCleaner.dmg
             dist/WorktreeCleaner-macOS.zip

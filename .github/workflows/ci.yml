@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  swift-and-mcp:
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: mcp-app/package-lock.json
+
+      - name: Build single-file MCP App UI
+        working-directory: mcp-app
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run Swift tests
+        run: swift test
+
+      - name: Build Universal macOS binaries
+        run: swift build -c release --arch arm64 --arch x86_64

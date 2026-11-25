@@ -1,0 +1,28 @@
+name: Feature Request
+description: Suggest an improvement, new agent integration, or guardrail
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Workflow Gap
+      description: What workflow or AI coding agent use case is currently missing or awkward?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: How should Worktree Cleaner handle this cleanly?
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Target Surface
+      options:
+        - Both macOS App & MCP App
+        - macOS App Only
+        - Antigravity MCP App Only
+      default: 0

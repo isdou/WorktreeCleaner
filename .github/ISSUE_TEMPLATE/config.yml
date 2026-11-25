@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions (Q&A / Ideas)
+    url: https://github.com/isdou/WorktreeCleaner/discussions
+    about: Ask questions, share your agent worktree workflow, or discuss new ideas before filing an issue.

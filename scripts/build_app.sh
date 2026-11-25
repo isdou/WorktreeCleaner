@@ -143,7 +143,7 @@ sign_with_identity() {
   if [[ "$id" == "-" ]]; then
     codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null 2>&1
   else
-    codesign --force --deep --options runtime --sign "$id" "$APP_BUNDLE" >/dev/null 2>&1
+    codesign --force --deep --options runtime --timestamp --sign "$id" "$APP_BUNDLE" >/dev/null 2>&1
   fi
 }
 

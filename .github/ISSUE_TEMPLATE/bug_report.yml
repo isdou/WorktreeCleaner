@@ -1,0 +1,47 @@
+name: Bug Report
+description: Report a bug in Worktree Cleaner (macOS App or Antigravity MCP App)
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue! Please make sure no private paths, secrets, or `.env` contents are included in logs or screenshots.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Component / Surface
+      options:
+        - macOS Native App (Main Window / Menu Bar)
+        - Antigravity MCP App Plugin
+        - Core Scanner / Git Operations
+        - Build / Packaging / Signing
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: App & macOS Version
+      placeholder: e.g. Worktree Cleaner v1.0.0 on macOS 26.0 (Apple Silicon)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1. Create a worktree with ...
+        2. Open Worktree Cleaner
+        3. Click ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or Screenshots (Sanitized)
+      description: Output from `swift test` or Antigravity MCP logs if applicable.
