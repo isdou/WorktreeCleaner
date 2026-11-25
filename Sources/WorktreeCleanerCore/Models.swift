@@ -237,6 +237,21 @@ public struct FeatureSummary: Hashable, Sendable {
 }
 
 /// 单个 Git Worktree 的完整体检信息
+public struct OriginDeletionTarget: Hashable, Sendable {
+    public let branch: String
+    public let expectedOID: String
+    /// Fingerprint of the effective push destination. Its URL may contain credentials.
+    public let endpointID: String
+    var trackingRef: String
+
+    public init(branch: String, expectedOID: String, endpointID: String) {
+        self.branch = branch
+        self.expectedOID = expectedOID
+        self.endpointID = endpointID
+        self.trackingRef = "refs/remotes/origin/\(branch)"
+    }
+}
+
 public struct WorktreeItem: Identifiable, Hashable, Sendable {
     public let id: String
     public let path: String
@@ -252,6 +267,7 @@ public struct WorktreeItem: Identifiable, Hashable, Sendable {
     public let directoryExists: Bool
     public let source: WorktreeSource
     public let remoteName: String?
+    public var originDeletionTarget: OriginDeletionTarget?
 
     public let modifiedCount: Int
     public let untrackedCount: Int
@@ -288,6 +304,7 @@ public struct WorktreeItem: Identifiable, Hashable, Sendable {
         directoryExists: Bool,
         source: WorktreeSource,
         remoteName: String?,
+        originDeletionTarget: OriginDeletionTarget? = nil,
         modifiedCount: Int,
         untrackedCount: Int,
         aheadCount: Int,
@@ -319,6 +336,7 @@ public struct WorktreeItem: Identifiable, Hashable, Sendable {
         self.directoryExists = directoryExists
         self.source = source
         self.remoteName = remoteName
+        self.originDeletionTarget = originDeletionTarget
         self.modifiedCount = modifiedCount
         self.untrackedCount = untrackedCount
         self.aheadCount = aheadCount
@@ -408,9 +426,10 @@ public struct WorktreeItem: Identifiable, Hashable, Sendable {
 
     public var canDeleteLocalBranch: Bool {
         guard !isOrphan, !isMissing, !isDetached, !branch.isEmpty else { return false }
-        let protected: Set<String> = ["main", "master", "develop", "dev", "prd", "production", "staging"]
-        return !protected.contains(branch.lowercased())
+        return !Self.protectedBranchNames.contains(branch.lowercased())
     }
+
+    static let protectedBranchNames: Set<String> = ["main", "master", "develop", "dev", "prd", "production", "staging"]
 
     public var suggestedCommitMessage: String {
         if let firstTask = featureSummary?.agentTasks.first, !firstTask.isEmpty {

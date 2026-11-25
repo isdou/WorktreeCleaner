@@ -38,6 +38,14 @@ interface WorktreeItemDTO {
   canPush: boolean;
   needsPush: boolean;
   canDeleteLocalBranch: boolean;
+  originDeletionTarget?: {
+    branch: string;
+    expectedOID: string;
+    endpointID: string;
+    localBranch: string;
+    headCommit: string;
+    mainRepoPath: string;
+  };
   suggestedCommitMessage: string;
   suggestedPushBranchName: string;
   activeProcesses: string[];
@@ -117,6 +125,7 @@ const state = {
         moveToTrash: boolean;
         backupCommitFirst: boolean;
         deleteLocalBranch: boolean;
+        deleteOriginBranch: boolean;
         force: boolean;
         error: string | null;
       }
@@ -126,6 +135,8 @@ const state = {
         moveToTrash: boolean;
         backupCommitFirst: boolean;
         deleteLocalBranch: boolean;
+        deleteOriginBranch: boolean;
+        completed: boolean;
         error: string | null;
       },
 };
@@ -422,6 +433,7 @@ async function handleExecuteRemove(): Promise<void> {
       backupCommitFirst: m.backupCommitFirst,
       moveToTrash: m.moveToTrash,
       deleteLocalBranch: m.deleteLocalBranch,
+      ...(m.deleteOriginBranch ? { originDeletionTarget: m.item.originDeletionTarget } : {}),
       force: m.force,
     });
     if (res.isError) {
@@ -440,56 +452,56 @@ async function handleExecuteRemove(): Promise<void> {
 }
 
 async function handleExecuteBatchRemove(): Promise<void> {
-  if (!state.modal || state.modal.type !== "batch-remove" || state.busy) return;
+  if (!state.modal || state.modal.type !== "batch-remove" || state.modal.completed || state.busy) return;
   const m = state.modal;
   state.busy = true;
   m.error = null;
   render();
 
-  let removedCount = 0;
+  let completed = 0;
+  let absentOriginBranches = 0;
   const errors: string[] = [];
+  const { backupCommitFirst, moveToTrash, deleteLocalBranch, deleteOriginBranch } = m;
   try {
-    for (let i = 0; i < m.items.length; i++) {
-      const item = m.items[i];
-      const res = await callTool("remove_worktree", {
-        path: item.path,
-        backupCommitFirst: m.backupCommitFirst,
-        moveToTrash: item.isMissing ? false : m.moveToTrash,
-        deleteLocalBranch: m.deleteLocalBranch && item.canDeleteLocalBranch,
-        force: false,
-        skipRescan: true,
-      });
-      if (res.isError) {
-        const msg = (res.structuredContent?.error as string) ?? res.content?.[0]?.text ?? "Remove failed";
-        errors.push(`${item.displayBranch}: ${msg}`);
-      } else {
-        removedCount++;
+    for (const item of m.items) {
+      const target = deleteOriginBranch ? item.originDeletionTarget : undefined;
+      const label = `${item.mainRepoName} · ${item.displayBranch}${target ? ` (origin/${target.branch})` : ""}`;
+      try {
+        const res = await callTool("remove_worktree", {
+          path: item.path,
+          backupCommitFirst,
+          moveToTrash: item.isMissing ? false : moveToTrash,
+          deleteLocalBranch: deleteLocalBranch && item.canDeleteLocalBranch,
+          ...(target ? { originDeletionTarget: target } : {}),
+          force: false,
+          skipRescan: true,
+        });
+        if (res.isError) {
+          const msg = (res.structuredContent?.error as string) ?? res.content?.[0]?.text ?? "Remove failed";
+          errors.push(`${label}: ${msg}`);
+          continue;
+        }
+        completed++;
+        if (target) absentOriginBranches++;
         state.checkedIds.delete(item.id);
+      } catch (err) {
+        errors.push(`${label}: ${tr("未能确认操作结果", "Outcome unconfirmed")} · ${String(err)}`);
       }
     }
-
-    // 批量清理完毕统一刷新一次扫描结果
-    const scanRes = await callTool("scan_worktrees", { includeDiskSizes: true });
-    if (!scanRes.isError && scanRes.structuredContent) {
-      applyScanPayload(scanRes.structuredContent);
-    }
-
+    const summary = tr(`${completed}/${m.items.length} 项清理完成`, `${completed}/${m.items.length} removals completed`)
+      + (absentOriginBranches ? tr(`，${absentOriginBranches} 个目标分支已不在 origin 上`, `. ${absentOriginBranches} target branch(es) absent from origin`) : "");
     if (errors.length > 0) {
-      m.error = errors.join("\n");
-      if (removedCount > 0) {
-        showToast(tr(`已清理 ${removedCount} 项，${errors.length} 项失败`, `Removed ${removedCount}, ${errors.length} failed`), true);
-      }
+      m.completed = true;
+      m.error = [summary, ...errors].join("\n");
     } else {
       state.modal = null;
-      showToast(
-        tr(
-          `已将 ${removedCount} 项 Worktree ${m.moveToTrash ? "移入废纸篓" : "移除"}`,
-          `Removed ${removedCount} worktree(s)`
-        )
-      );
+      showToast(summary);
     }
+    const scanRes = await callTool("scan_worktrees", { includeDiskSizes: true });
+    if (scanRes.isError) throw new Error(scanRes.content?.[0]?.text ?? "Scan failed");
+    applyScanPayload(scanRes.structuredContent);
   } catch (err) {
-    m.error = String(err);
+    showToast(tr(`扫描刷新失败：${err}`, `Could not refresh scan: ${err}`), true);
   } finally {
     state.busy = false;
     render();
@@ -1070,6 +1082,25 @@ function renderDetail(item: WorktreeItemDTO): string {
   `;
 }
 
+function originDeletionOption(items: WorktreeItemDTO[], enabled: boolean): string {
+  const targets = items.flatMap(item => item.originDeletionTarget ? [item.originDeletionTarget] : []);
+  if (!targets.length) return "";
+
+  const label = targets.length === 1
+    ? tr(`同时删除远端分支 origin/${targets[0].branch}`, `Also delete remote branch origin/${targets[0].branch}`)
+    : tr(`同时删除以下 ${targets.length} 个远端分支`, `Also delete these ${targets.length} remote branches`);
+  return `<div class="origin-delete-option">
+    <label class="check-row">
+      <input id="rm-origin" type="checkbox" ${enabled ? "checked" : ""} ${state.busy ? "disabled" : ""} />
+      <span>${esc(label)}</span>
+    </label>
+    <ul class="origin-target-list">${targets.map(target =>
+      `<li>${items.length > 1 ? `<strong class="mono">origin/${esc(target.branch)}</strong><br>` : ""}${esc(target.mainRepoPath)} · <span class="mono">${esc(target.localBranch)} @ ${esc(target.headCommit.slice(0, 10))}</span></li>`
+    ).join("")}</ul>
+    <div class="field-label">${tr("远端分支不会进入 macOS 废纸篓。", "Remote branches do not go to the macOS Trash.")}</div>
+  </div>`;
+}
+
 function renderModal(): string {
   const m = state.modal;
   if (!m) return "";
@@ -1125,6 +1156,13 @@ function renderModal(): string {
   }
 
   if (m.type === "batch-remove") {
+    if (m.completed) {
+      return `<div class="modal-backdrop" id="modal-backdrop"><div class="modal">
+        <div class="modal-head">${tr("清理结果", "Removal results")}</div>
+        <div class="modal-body"><div class="error-box">${esc(m.error ?? "")}</div></div>
+        <div class="modal-foot"><button class="btn" id="modal-close-btn" ${state.busy ? "disabled" : ""}>${tr("关闭", "Close")}</button></div>
+      </div></div>`;
+    }
     const totalBytes = m.items.reduce((acc, i) => acc + i.diskSizeBytes, 0);
     const hasDirty = m.items.some((i) => i.isDirty);
     const hasDeletableBranch = m.items.some((i) => i.canDeleteLocalBranch);
@@ -1172,12 +1210,13 @@ function renderModal(): string {
                   </label>`
                 : ""
             }
+            ${originDeletionOption(m.items, m.deleteOriginBranch)}
             ${m.error ? `<div class="error-box">${esc(m.error)}</div>` : ""}
           </div>
           <div class="modal-foot">
             <button class="btn" id="modal-close-btn" ${state.busy ? "disabled" : ""}>${tr("取消", "Cancel")}</button>
-            <button class="btn ${hasDanger ? "btn-danger" : "btn-primary"}" id="btn-confirm-batch-remove" ${state.busy ? "disabled" : ""}>
-              ${state.busy ? tr("处理中…", "Removing…") : m.moveToTrash ? tr(`移入废纸篓 (${m.items.length})`, `Move to Trash (${m.items.length})`) : tr(`确认移除 (${m.items.length})`, `Remove (${m.items.length})`)}
+            <button class="btn ${hasDanger || m.deleteOriginBranch ? "btn-danger" : "btn-primary"}" id="btn-confirm-batch-remove" ${state.busy ? "disabled" : ""}>
+              ${state.busy ? tr("处理中…", "Removing…") : m.deleteOriginBranch ? tr("移除并删除远端分支", "Remove & delete remote branches") : m.moveToTrash ? tr(`移入废纸篓 (${m.items.length})`, `Move to Trash (${m.items.length})`) : tr(`确认移除 (${m.items.length})`, `Remove (${m.items.length})`)}
             </button>
           </div>
         </div>
@@ -1226,12 +1265,13 @@ function renderModal(): string {
                 </label>`
               : ""
           }
+          ${originDeletionOption([m.item], m.deleteOriginBranch)}
           ${m.error ? `<div class="error-box">${esc(m.error)}</div>` : ""}
         </div>
         <div class="modal-foot">
           <button class="btn" id="modal-close-btn" ${state.busy ? "disabled" : ""}>${tr("取消", "Cancel")}</button>
-          <button class="btn ${m.item.safetyLevel === "danger" ? "btn-danger" : "btn-primary"}" id="btn-confirm-remove" ${state.busy ? "disabled" : ""}>
-            ${state.busy ? tr("处理中…", "Removing…") : m.moveToTrash ? tr("移入废纸篓", "Move to Trash") : tr("确认移除", "Remove")}
+          <button class="btn ${m.item.safetyLevel === "danger" || m.deleteOriginBranch ? "btn-danger" : "btn-primary"}" id="btn-confirm-remove" ${state.busy ? "disabled" : ""}>
+            ${state.busy ? tr("处理中…", "Removing…") : m.deleteOriginBranch ? tr("移除并删除远端分支", "Remove & delete remote branch") : m.moveToTrash ? tr("移入废纸篓", "Move to Trash") : tr("确认移除", "Remove")}
           </button>
         </div>
       </div>
@@ -1336,6 +1376,8 @@ function bindEvents(): void {
       moveToTrash: true,
       backupCommitFirst: true,
       deleteLocalBranch: false,
+      deleteOriginBranch: false,
+      completed: false,
       error: null,
     };
     render();
@@ -1378,6 +1420,7 @@ function bindEvents(): void {
         moveToTrash: !item.isMissing,
         backupCommitFirst: true,
         deleteLocalBranch: false,
+        deleteOriginBranch: false,
         force: false,
         error: null,
       };
@@ -1408,6 +1451,11 @@ function bindEvents(): void {
     document.getElementById("btn-confirm-push")?.addEventListener("click", () => void handleExecutePush());
   }
 
+  if (state.modal?.type === "remove" || state.modal?.type === "batch-remove") {
+    const m = state.modal;
+    const origin = document.getElementById("rm-origin") as HTMLInputElement | null;
+    if (origin) origin.onchange = () => { m.deleteOriginBranch = origin.checked; render(); };
+  }
   if (state.modal?.type === "remove") {
     const m = state.modal;
     const trashEl = document.getElementById("rm-trash") as HTMLInputElement | null;

@@ -63,7 +63,7 @@
 - **灵活处置闭环**
   - **仅瘦身清缓存**：只将 `node_modules`、`.next`、`.build`、`target`、`DerivedData`、`.venv` 移入废纸篓，完整保留全部源码和未提交改动。
   - **一键提交并推送**：自动预填任务 Commit 说明（支持 Detached HEAD 新建分支），推完可顺手移入废纸篓。
-  - **可选清理本地分支**：移除时按需同步删除安全的本地分支（永久保护 `main` / `master` / `develop` / `dev` / `prd` / `production` / `staging`）。
+  - **可选清理分支**：移除 Worktree 时可分别勾选删除对应的本地分支和 `origin` 分支，两项默认关闭。确认窗口会显示具体的远端分支名。如果远端分支在扫描后收到新提交，清理会停止，保留本地 Worktree。远端删除无法通过 Mac 废纸篓撤销。远端默认分支及 `main`、`master`、`develop`、`dev`、`prd`、`production`、`staging` 等保护分支不参与远端清理。
 - **正宗 macOS 原生体验**
   - 顶部菜单栏悬浮概览 + 双栏 Liquid Glass 主窗口（支持 `⌘K` 搜索、`⌘R` 刷新、`↑`/`↓` 切换、右键菜单、一键用 Cursor / VS Code / Zed / Antigravity / Xcode 打开、中英双语实时切换、开机自启）。
 

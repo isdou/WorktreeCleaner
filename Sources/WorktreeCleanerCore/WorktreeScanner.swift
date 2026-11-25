@@ -156,6 +156,15 @@ public enum WorktreeScanner {
             }
         }
 
+        // Resolve the optional remote action after the parallel status/diff scan. Each worktree
+        // can override its own origin config, so keep the reads local to that checkout and bounded.
+        for index in inspected.indices {
+            let item = inspected[index]
+            if item.kind == .linkedWorktree && item.canDeleteLocalBranch && item.activeProcesses.isEmpty
+                && !item.isLocked && item.remoteName == "origin" {
+                inspected[index].originDeletionTarget = await originDeletionTarget(for: item.branch, in: item.path)
+            }
+        }
         return inspected.sorted { lhs, rhs in
             if lhs.safetyLevel != rhs.safetyLevel {
                 return lhs.safetyLevel < rhs.safetyLevel
@@ -491,7 +500,7 @@ public enum WorktreeScanner {
                 current.head = String(line.dropFirst("HEAD ".count))
             } else if line.hasPrefix("branch ") {
                 let ref = String(line.dropFirst("branch ".count))
-                current.branch = ref.replacingOccurrences(of: "refs/heads/", with: "")
+                current.branch = ref.hasPrefix("refs/heads/") ? String(ref.dropFirst("refs/heads/".count)) : ""
             } else if line == "detached" {
                 current.isDetached = true
             } else if line.hasPrefix("locked") {
@@ -1251,7 +1260,63 @@ public enum WorktreeScanner {
         backupCommitFirst: Bool = false,
         moveToTrash: Bool = true,
         deleteLocalBranch: Bool = false,
+        originDeletionTarget: OriginDeletionTarget? = nil,
         force: Bool = false
+    ) async -> Result<Void, Error> {
+        if let target = originDeletionTarget {
+            let disposition: String
+            do {
+                try await verifyWorktreeForOriginDeletion(item)
+                let deleted = try await deleteOriginBranch(target, for: item)
+                disposition = deleted ? "was deleted" : "was already absent"
+            } catch {
+                return .failure(error)
+            }
+            do {
+                try await verifyWorktreeForOriginDeletion(item)
+                try await removeLocalWorktree(item, backupCommitFirst: backupCommitFirst, moveToTrash: moveToTrash,
+                                              deleteLocalBranch: deleteLocalBranch, force: force, afterOriginDeletion: true).get()
+                return .success(())
+            } catch {
+                return .failure(CleanerError(message: "origin/\(target.branch) \(disposition). Local cleanup did not complete: \(error.localizedDescription)"))
+            }
+        }
+        return await removeLocalWorktree(item, backupCommitFirst: backupCommitFirst, moveToTrash: moveToTrash,
+                                         deleteLocalBranch: deleteLocalBranch, force: force)
+    }
+
+    private static func verifyWorktreeForOriginDeletion(_ item: WorktreeItem) async throws {
+        func physicalPath(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path }
+        let path = physicalPath(item.path)
+        let entries = await listPorcelainWorktrees(in: item.mainRepoPath)
+        guard item.kind == .linkedWorktree, item.canDeleteLocalBranch, item.directoryExists, item.activeProcesses.isEmpty,
+              !item.isLocked, path != physicalPath(item.mainRepoPath), path != entries.first.map({ physicalPath($0.path) }),
+              entries.contains(where: { physicalPath($0.path) == path && $0.branch == item.branch
+                  && $0.head == item.headCommit && !$0.isPrunable && !$0.isDetached && !$0.isLocked })
+        else { throw CleanerError(message: "The selected worktree or its branch changed. Refresh before removing it.") }
+
+        let actualDir = await ShellRunner.git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel",
+                                              "--symbolic-full-name", "HEAD"], in: item.path)
+        let expectedDir = await ShellRunner.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: item.mainRepoPath)
+        let actual = actualDir.stdout.split(separator: "\n").map(String.init)
+        guard actualDir.succeeded, expectedDir.succeeded, actual.count == 3, physicalPath(actual[1]) == path,
+              actual[2] == "refs/heads/\(item.branch)",
+              physicalPath(actual[0]) == physicalPath(expectedDir.stdout.trimmingCharacters(in: .newlines))
+        else { throw CleanerError(message: "The worktree no longer belongs to the selected repository.") }
+
+        let lsof = await ShellRunner.run("/usr/sbin/lsof", arguments: ["-a", "-d", "cwd", "-Fpcn"], timeout: 5)
+        guard lsof.succeeded, !lsof.stdout.isEmpty else {
+            throw CleanerError(message: "Could not check whether a process is using the worktree. Local cleanup was stopped.")
+        }
+        let cwdEntries = parseLsofCwdOutput(lsof.stdout, excludingPID: ProcessInfo.processInfo.processIdentifier)
+        guard matchingProcesses(for: path, entries: cwdEntries).isEmpty else {
+            throw CleanerError(message: "A running process is using this worktree. Local cleanup was stopped.")
+        }
+    }
+
+    private static func removeLocalWorktree(
+        _ item: WorktreeItem, backupCommitFirst: Bool, moveToTrash: Bool, deleteLocalBranch: Bool, force: Bool,
+        afterOriginDeletion: Bool = false
     ) async -> Result<Void, Error> {
         let fm = FileManager.default
 
@@ -1303,6 +1368,13 @@ public enum WorktreeScanner {
             if !commitRes.succeeded && !commitRes.stdout.contains("nothing to commit") {
                 return .failure(CleanerError(message: "Auto-commit backup failed: \(commitRes.stderr)"))
             }
+            if afterOriginDeletion && deleteLocalBranch {
+                let backupBranch = "backup/\(activeBranchName)-\(UUID().uuidString.prefix(8))"
+                let saved = await ShellRunner.git(["branch", backupBranch, "HEAD"], in: item.path)
+                guard saved.succeeded else {
+                    return .failure(CleanerError(message: "Could not retain the backup commit. The local worktree and branch were kept."))
+                }
+            }
         }
 
         // 4. 若锁定且强制清理，先解锁
@@ -1341,7 +1413,10 @@ public enum WorktreeScanner {
 
         // 6. 如用户勾选“同时删除已同步的本地分支”
         if deleteLocalBranch && item.canDeleteLocalBranch && !activeBranchName.isEmpty && !item.mainRepoPath.isEmpty {
-            _ = await ShellRunner.git(["branch", "-D", activeBranchName], in: item.mainRepoPath)
+            let deleted = await ShellRunner.git(["branch", "-D", activeBranchName], in: item.mainRepoPath)
+            if afterOriginDeletion && !deleted.succeeded {
+                return .failure(CleanerError(message: "The worktree was removed, but Git could not delete local branch \(activeBranchName)."))
+            }
         }
 
         return .success(())

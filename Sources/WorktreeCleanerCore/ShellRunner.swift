@@ -2,6 +2,15 @@ import Foundation
 
 /// 轻量异步命令行执行器：带并发读取与超时保护，绝不阻塞主线程或因 pipe 写满挂起
 public enum ShellRunner {
+    // A scan fans out across repositories. Leave threads available to drain pipes and reap children.
+    private static let processQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "WorktreeCleaner.subprocesses"
+        queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = 8
+        return queue
+    }()
+
     public struct Output: Sendable {
         public let exitCode: Int32
         public let stdout: String
@@ -23,7 +32,7 @@ public enum ShellRunner {
         timeout: TimeInterval = 15
     ) async -> Output {
         await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
+            processQueue.addOperation {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: executable)
                 process.arguments = arguments
@@ -47,6 +56,8 @@ public enum ShellRunner {
                 let errPipe = Pipe()
                 process.standardOutput = outPipe
                 process.standardError = errPipe
+                let exited = DispatchSemaphore(value: 0)
+                process.terminationHandler = { _ in exited.signal() }
 
                 do {
                     try process.run()
@@ -71,21 +82,17 @@ public enum ShellRunner {
                     ioGroup.leave()
                 }
 
-                let waitGroup = DispatchGroup()
-                waitGroup.enter()
-                DispatchQueue.global(qos: .utility).async {
-                    process.waitUntilExit()
-                    waitGroup.leave()
-                }
-
-                if waitGroup.wait(timeout: .now() + timeout) == .timedOut {
-                    process.terminate()
+                if exited.wait(timeout: .now() + timeout) == .timedOut {
+                    if process.isRunning { process.terminate() }
                     _ = ioGroup.wait(timeout: .now() + 1)
                     continuation.resume(returning: Output(exitCode: -2, stdout: "", stderr: "Command timed out"))
                     return
                 }
 
-                _ = ioGroup.wait(timeout: .now() + 2)
+                guard ioGroup.wait(timeout: .now() + 2) == .success else {
+                    continuation.resume(returning: Output(exitCode: -2, stdout: "", stderr: "Timed out reading command output"))
+                    return
+                }
                 let stdout = String(data: outData, encoding: .utf8) ?? ""
                 let stderr = String(data: errData, encoding: .utf8) ?? ""
 

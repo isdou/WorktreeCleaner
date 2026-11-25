@@ -310,7 +310,7 @@ public actor MCPServerHandler {
             [
                 "name": "remove_worktree",
                 "title": "Safely Remove Worktree",
-                "description": "App-only action: remove a Git worktree or orphaned directory (moves to macOS Trash + git worktree prune by default, with optional auto-commit backup and optional synced local branch deletion).",
+                "description": "App-only action: remove a Git worktree or orphaned directory. Local branch deletion and deletion of the confirmed branch on origin are separate options.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
@@ -318,6 +318,20 @@ public actor MCPServerHandler {
                         "backupCommitFirst": ["type": "boolean", "description": "Auto-commit uncommitted changes into the branch before removal (default true)."],
                         "moveToTrash": ["type": "boolean", "description": "Move directory to macOS Trash instead of permanent rm (default true)."],
                         "deleteLocalBranch": ["type": "boolean", "description": "Also delete matching local branch (protected branches are never deleted; default false)."],
+                        "originDeletionTarget": [
+                            "type": "object",
+                            "description": "Only when explicitly selected: the origin target and local worktree identity from the confirmation view. Omit to keep the remote branch.",
+                            "properties": [
+                                "branch": ["type": "string"],
+                                "expectedOID": ["type": "string"],
+                                "endpointID": ["type": "string"],
+                                "localBranch": ["type": "string"],
+                                "headCommit": ["type": "string"],
+                                "mainRepoPath": ["type": "string"]
+                            ],
+                            "required": ["branch", "expectedOID", "endpointID", "localBranch", "headCommit", "mainRepoPath"],
+                            "additionalProperties": false
+                        ],
                         "force": ["type": "boolean", "description": "Force removal even if active processes or locks are detected (default false)."],
                         "skipRescan": ["type": "boolean", "description": "Skip immediate full rescan after removal (used during batch UI deletion; default false)."]
                     ],
@@ -510,6 +524,17 @@ public actor MCPServerHandler {
             let deleteBranch = (arguments["deleteLocalBranch"] as? Bool) ?? false
             let force = (arguments["force"] as? Bool) ?? false
             let skipRescan = (arguments["skipRescan"] as? Bool) ?? false
+            var originTarget: OriginDeletionTarget?
+            if let requested = arguments["originDeletionTarget"] {
+                guard let fields = requested as? [String: String], let scanned = item.originDeletionTarget,
+                      fields["branch"] == scanned.branch, fields["expectedOID"] == scanned.expectedOID,
+                      fields["endpointID"] == scanned.endpointID,
+                      fields["localBranch"] == item.branch, fields["headCommit"] == item.headCommit,
+                      fields["mainRepoPath"] == item.mainRepoPath else {
+                    return errorResult("The confirmed worktree or origin branch no longer matches the scan. Refresh and review the deletion again.")
+                }
+                originTarget = scanned
+            }
 
             if !item.activeProcesses.isEmpty && !force {
                 let procs = item.activeProcesses.joined(separator: ", ")
@@ -521,12 +546,16 @@ public actor MCPServerHandler {
                 backupCommitFirst: backup,
                 moveToTrash: moveToTrash,
                 deleteLocalBranch: deleteBranch,
+                originDeletionTarget: originTarget,
                 force: force || item.safetyLevel == .danger
             )
             switch res {
             case .success:
                 let actionDesc = moveToTrash ? "Moved to Trash and pruned" : "Removed"
-                let msg = "\(actionDesc): \(item.mainRepoName) · \(item.displayBranch(language: .en))"
+                var msg = "\(actionDesc): \(item.mainRepoName) · \(item.displayBranch(language: .en))"
+                if let originTarget {
+                    msg += ". origin/\(originTarget.branch) is absent."
+                }
                 var sc: [String: Any] = [
                     "removedPath": item.path,
                     "movedToTrash": moveToTrash,
@@ -691,6 +720,16 @@ public actor MCPServerHandler {
                 "unpushedCommits": item.unpushedCommits.prefix(10).map { ["hash": $0.id, "message": $0.message] }
             ]
 
+            if let target = item.originDeletionTarget {
+                dict["originDeletionTarget"] = [
+                    "branch": target.branch,
+                    "expectedOID": target.expectedOID,
+                    "endpointID": target.endpointID,
+                    "localBranch": item.branch,
+                    "headCommit": item.headCommit,
+                    "mainRepoPath": item.mainRepoPath
+                ]
+            }
             if let mod = item.lastModified {
                 dict["lastModified"] = iso.string(from: mod)
             }

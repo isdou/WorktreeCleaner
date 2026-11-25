@@ -63,7 +63,7 @@ Every discovered worktree or orphan directory is classified automatically into f
 - **Flexible Workflows**
   - **Slim Build Caches Only**: Moves `node_modules`, `.next`, `.build`, `target`, `DerivedData`, `.venv`, etc. to macOS Trash while keeping 100% of source files and uncommitted edits intact.
   - **One-Click Commit & Push**: Stages, commits with an auto-generated task summary, pushes (including creating a branch from Detached HEAD), and optionally trashes the worktree right after.
-  - **Optional Branch Cleanup**: Clean up matching synced local branches while permanently protecting `main` / `master` / `develop` / `dev` / `prd` / `production` / `staging`.
+  - **Optional branch cleanup**: When removing a worktree, select its local branch, its branch on `origin`, or both. Both options are off by default. The confirmation names the remote branch. If it receives a new commit after the scan, cleanup stops and the local worktree stays in place. The Mac Trash cannot restore a remote branch. The default branch on `origin` and protected names such as `main`, `master`, `develop`, `dev`, `prd`, `production` and `staging` are excluded from remote deletion.
 - **Native macOS Experience**
   - Menu bar overview popover + dual-pane Liquid Glass inspector (`⌘K` search, `⌘R` rescan, `↑`/`↓` navigation, Quick IDE launcher for Cursor / VS Code / Zed / Antigravity / Xcode, live EN/ZH toggle, Launch at Login).
 

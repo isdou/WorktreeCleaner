@@ -370,6 +370,7 @@ final class AppState {
         backupDirtyFirst: Bool,
         moveToTrash: Bool,
         deleteLocalBranch: Bool,
+        deleteOriginBranches: Bool = false,
         force: Bool
     ) async {
         guard !targets.isEmpty, !isCleaning else { return }
@@ -381,11 +382,13 @@ final class AppState {
         var freed: Int64 = 0
 
         for item in targets {
+            let originTarget = deleteOriginBranches ? item.originDeletionTarget : nil
             let result = await WorktreeScanner.removeWorktree(
                 item,
                 backupCommitFirst: backupDirtyFirst,
                 moveToTrash: moveToTrash,
                 deleteLocalBranch: deleteLocalBranch,
+                originDeletionTarget: originTarget,
                 force: force || item.safetyLevel == .danger
             )
             switch result {
@@ -393,7 +396,8 @@ final class AppState {
                 succeeded += 1
                 freed += item.diskSizeBytes ?? 0
             case .failure(let err):
-                failed.append((item.path, err.localizedDescription))
+                let branch = originTarget.map { "origin/\($0.branch)" } ?? item.displayBranch(language: language)
+                failed.append((item.path, "\(item.mainRepoName) · \(branch) — \(err.localizedDescription)"))
             }
         }
 
@@ -408,20 +412,18 @@ final class AppState {
 
         if failed.isEmpty {
             let sizeStr = ByteCountFormatter.string(fromByteCount: freed, countStyle: .file)
-            if moveToTrash {
-                showToast(
-                    tr("已移入废纸篓并清理 \(succeeded) 个 Worktree（约 \(sizeStr)）", "Moved \(succeeded) worktrees to Trash (~\(sizeStr))"),
-                    isError: false
-                )
-            } else {
-                showToast(
-                    tr("已永久移除 \(succeeded) 个 Worktree（约 \(sizeStr)）", "Removed \(succeeded) worktrees (~\(sizeStr))"),
-                    isError: false
-                )
+            var message = moveToTrash
+                ? tr("已移入废纸篓并清理 \(succeeded) 个 Worktree（约 \(sizeStr)）", "Moved \(succeeded) worktrees to Trash (~\(sizeStr))")
+                : tr("已永久移除 \(succeeded) 个 Worktree（约 \(sizeStr)）", "Removed \(succeeded) worktrees (~\(sizeStr))")
+            if deleteOriginBranches && targets.contains(where: { $0.originDeletionTarget != nil }) {
+                message += tr("，所选 origin 分支均已不存在", ". The selected branches are absent from origin.")
             }
+            showToast(message, isError: false)
         } else {
+            let details = failed.map { $0.1 }.joined(separator: "\n")
             showToast(
-                tr("成功 \(succeeded) 个，失败 \(failed.count) 个：\(failed.first?.1 ?? "")", "Succeeded \(succeeded), failed \(failed.count): \(failed.first?.1 ?? "")"),
+                tr("已完成 \(succeeded) 项，\(failed.count) 项未完成。", "Completed \(succeeded). Incomplete: \(failed.count).")
+                    + "\n" + details,
                 isError: true
             )
         }

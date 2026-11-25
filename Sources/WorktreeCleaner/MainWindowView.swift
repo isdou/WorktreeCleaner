@@ -1134,6 +1134,7 @@ private struct ToastBanner: View {
             Text(message)
                 .font(.system(size: 12, weight: .medium))
                 .lineLimit(2)
+                .help(message)
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9.5, weight: .semibold))
@@ -1297,11 +1298,13 @@ private struct DeleteConfirmationSheet: View {
     @State private var backupDirtyBeforeDelete = true
     @State private var moveToTrash = true
     @State private var deleteLocalBranch = false
+    @State private var deleteOriginBranches = false
 
     private var targets: [WorktreeItem] { state.pendingDeleteTargets }
     private var dirtyTargets: [WorktreeItem] { targets.filter(\.isDirty) }
     private var hasPhysicalFolders: Bool { targets.contains { !$0.isMissing } }
     private var hasDeletableBranches: Bool { targets.contains(where: \.canDeleteLocalBranch) }
+    private var originTargets: [WorktreeItem] { targets.filter { $0.originDeletionTarget != nil } }
     private var totalSize: Int64 { targets.compactMap(\.diskSizeBytes).reduce(0, +) }
 
     var body: some View {
@@ -1310,14 +1313,14 @@ private struct DeleteConfirmationSheet: View {
                 let sizeText = ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file)
                 Text(state.tr("确认移除 \(targets.count) 个 Worktree", "Remove \(targets.count) Worktree(s)"))
                     .font(.system(size: 14, weight: .semibold))
-                Text(state.tr("预计释放 \(sizeText)，主仓库不受影响", "Reclaims ~\(sizeText). Main repository stays untouched."))
+                Text(state.tr("所选 Worktree 共约 \(sizeText)", "Selected worktrees total about \(sizeText)."))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
 
             InsetGroupCard(cornerRadius: 10) {
                 ScrollView {
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         ForEach(targets) { item in
                             HStack(spacing: 8) {
                                 Circle()
@@ -1329,6 +1332,14 @@ private struct DeleteConfirmationSheet: View {
                                     Text(item.safetySummary(language: state.language, freshnessHours: state.freshnessHours))
                                         .font(.system(size: 11))
                                         .foregroundStyle(.secondary)
+                                    if let target = item.originDeletionTarget {
+                                        let ref = "origin/\(target.branch)"
+                                        Text(verbatim: deleteOriginBranches ? state.tr("将删除 \(ref)", "Will delete \(ref)") : ref)
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundStyle(deleteOriginBranches ? Color.red : Color.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .help(item.mainRepoPath)
+                                    }
                                 }
                                 Spacer()
                                 Text(item.formattedSize)
@@ -1350,7 +1361,7 @@ private struct DeleteConfirmationSheet: View {
             VStack(alignment: .leading, spacing: 9) {
                 if hasPhysicalFolders {
                     Toggle(isOn: $moveToTrash) {
-                        Text(state.tr("移入废纸篓（可随时从废纸篓还原）", "Move to Trash (recoverable anytime)"))
+                        Text(state.tr("将 Worktree 文件夹移入废纸篓", "Move worktree folders to Trash"))
                             .font(.system(size: 12.5))
                     }
                     .toggleStyle(.switch)
@@ -1374,6 +1385,25 @@ private struct DeleteConfirmationSheet: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                 }
+
+                if !originTargets.isEmpty {
+                    let count = originTargets.count
+                    Toggle(isOn: $deleteOriginBranches) {
+                        Text(state.tr("同时删除 origin 上的分支（\(count)/\(targets.count) 项）",
+                                      "Also delete branches on origin (\(count) of \(targets.count) items)"))
+                            .font(.system(size: 12.5))
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+
+                    if deleteOriginBranches {
+                        Label(state.tr("远端分支删除后，无法从废纸篓恢复。",
+                                       "Deleted remote branches cannot be restored from Trash."),
+                              systemImage: "exclamationmark.triangle")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             AdaptiveGlassGroup(spacing: 8) {
@@ -1396,6 +1426,7 @@ private struct DeleteConfirmationSheet: View {
                                 backupDirtyFirst: backupDirtyBeforeDelete,
                                 moveToTrash: moveToTrash,
                                 deleteLocalBranch: deleteLocalBranch,
+                                deleteOriginBranches: deleteOriginBranches,
                                 force: true
                             )
                         }
@@ -1409,6 +1440,9 @@ private struct DeleteConfirmationSheet: View {
     }
 
     private var confirmTitle: String {
+        if deleteOriginBranches {
+            return state.tr("移除并删除远端分支", "Remove & Delete Remote Branches")
+        }
         if !dirtyTargets.isEmpty {
             return backupDirtyBeforeDelete
                 ? state.tr("备份并移除", "Backup & Remove")
@@ -1420,6 +1454,7 @@ private struct DeleteConfirmationSheet: View {
     }
 
     private var confirmTint: Color {
+        if deleteOriginBranches { return .red }
         if !dirtyTargets.isEmpty {
             return backupDirtyBeforeDelete ? .orange : .red
         }
