@@ -1,7 +1,7 @@
 {
   "name": "worktree-cleaner",
   "displayName": "Worktree Cleaner",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Interactive Antigravity MCP App & visual inspector for Git worktrees left behind by AI coding agents (Codex, Claude Code, Cursor, Trae). Recall what each worktree changed, slim caches, push branches, and safely move stale worktrees to Trash.",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [

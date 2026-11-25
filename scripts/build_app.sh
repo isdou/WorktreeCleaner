@@ -10,7 +10,7 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 BUILD_DMG=false
 BUILD_ZIP=false
 UNIVERSAL=false
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.0.1}"
 
 for arg in "$@"; do
   case "$arg" in
@@ -93,7 +93,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <key>CFBundleShortVersionString</key>
     <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>

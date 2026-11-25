@@ -142,7 +142,7 @@ const state = {
 };
 
 const app = new App(
-  { name: "Worktree Cleaner", version: "1.1.0" },
+  { name: "Worktree Cleaner", version: "1.0.1" },
   { availableDisplayModes: ["inline", "fullscreen"] }
 );
 

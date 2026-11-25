@@ -6,7 +6,7 @@ public actor MCPServerHandler {
     public static let appURI = "ui://worktree-cleaner/app.html"
     public static let appMimeType = "text/html;profile=mcp-app"
     public static let serverName = "worktree-cleaner-mcp"
-    public static let serverVersion = "1.0.0"
+    public static let serverVersion = "1.0.1"
 
     private let customHTMLPath: String?
     private let executablePath: String
