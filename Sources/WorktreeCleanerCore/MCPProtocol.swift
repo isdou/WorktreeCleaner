@@ -756,22 +756,23 @@ public actor MCPServerHandler {
             return dict
         }
 
+        let summary: [String: Any] = [
+            "totalCount": items.count,
+            "safeCount": items.filter { $0.safetyLevel == .safe }.count,
+            "cautionCount": items.filter { $0.safetyLevel == .caution }.count,
+            "dangerCount": items.filter { $0.safetyLevel == .danger }.count,
+            "missingCount": items.filter { $0.safetyLevel == .missing }.count,
+            "reclaimableBytes": reclaimableBytes,
+            "formattedReclaimable": ByteCountFormatter.string(fromByteCount: reclaimableBytes, countStyle: .file),
+            "totalBytes": totalBytes,
+            "formattedTotal": ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file),
+            "totalCacheBytes": totalCacheBytes,
+            "formattedTotalCache": ByteCountFormatter.string(fromByteCount: totalCacheBytes, countStyle: .file)
+        ]
         var payload: [String: Any] = [
             "generatedAt": iso.string(from: Date()),
             "freshnessHours": freshnessHours,
-            "summary": [
-                "totalCount": items.count,
-                "safeCount": items.filter { $0.safetyLevel == .safe }.count,
-                "cautionCount": items.filter { $0.safetyLevel == .caution }.count,
-                "dangerCount": items.filter { $0.safetyLevel == .danger }.count,
-                "missingCount": items.filter { $0.safetyLevel == .missing }.count,
-                "reclaimableBytes": reclaimableBytes,
-                "formattedReclaimable": ByteCountFormatter.string(fromByteCount: reclaimableBytes, countStyle: .file),
-                "totalBytes": totalBytes,
-                "formattedTotal": ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file),
-                "totalCacheBytes": totalCacheBytes,
-                "formattedTotalCache": ByteCountFormatter.string(fromByteCount: totalCacheBytes, countStyle: .file)
-            ],
+            "summary": summary,
             "items": serializedItems
         ]
         if let initialFilter { payload["initialFilter"] = initialFilter }

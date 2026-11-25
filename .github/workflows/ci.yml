@@ -9,6 +9,8 @@ on:
 jobs:
   swift-and-mcp:
     runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
