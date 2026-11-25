@@ -29,10 +29,12 @@ cd "$PKG_DIR"
 
 if [[ "$UNIVERSAL" == true ]]; then
   swift build -c release --arch arm64 --arch x86_64
-  BIN_PATH="$PKG_DIR/.build/apple/Products/Release/$APP_NAME"
+  BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+  BIN_PATH="$BIN_DIR/$APP_NAME"
 else
   swift build -c release
-  BIN_PATH="$PKG_DIR/.build/release/$APP_NAME"
+  BIN_DIR="$(swift build -c release --show-bin-path)"
+  BIN_PATH="$BIN_DIR/$APP_NAME"
 fi
 
 if [[ ! -f "$BIN_PATH" ]]; then
